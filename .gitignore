@@ -178,7 +178,7 @@ cscope*
 # TVM generated code
 perf
 .bash_history
-*.json
+# *.json
 *.params
 *.ro
 *.onnx
