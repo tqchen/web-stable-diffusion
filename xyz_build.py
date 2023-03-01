@@ -2,8 +2,6 @@ import os
 
 import argparse
 import numpy as np
-import pickle
-from typing import Dict, List
 
 import tvm
 import tvm.testing
@@ -25,7 +23,6 @@ def build(
     target,
     output,
 ):
-    model_names = ["clip", "vae", "unet"]
     # Build the main functions.
     relax_mod = webgpu_module.Module
     ex = relax.build(relax_mod, target)

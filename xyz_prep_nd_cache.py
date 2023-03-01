@@ -11,9 +11,7 @@ from tvm.contrib import tvmjs
 from utils import load_constant_from_file
 
 def prepare_params():
-
-
-    const_dict = load_constant_from_file("const_params", tvm.cpu())
+    const_dict = load_constant_from_file("const_params", tvm.cpu(), deploy=True)
     meta_data = {}
     param_dict = {}
     for model in ["unet", "vae", "clip"]:
@@ -21,7 +19,7 @@ def prepare_params():
         for i, nd in enumerate(const_dict[model]):
             param_dict[f"{model}_{i}"] = nd
     tvmjs.dump_ndarray_cache(param_dict,
-                             "../tvm/web/.ndarray_cache/sd-metal-v1-5",
+                             "../tvm/web/.ndarray_cache/sd-webgpu-v1-5",
                              meta_data=meta_data)
 
 prepare_params()
