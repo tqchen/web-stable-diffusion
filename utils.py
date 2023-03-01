@@ -9,13 +9,20 @@ import tvm
 from tvm import relax
 
 
-def load_constant_from_file(dir: str, dev) -> Dict[str, List[tvm.nd.NDArray]]:
+def load_constant_from_file(dir: str, dev, deploy: bool) -> Dict[str, List[tvm.nd.NDArray]]:
     const_dict: Dict[str, List[np.ndarray]] = dict()
     for model_name in ["clip", "vae", "unet"]:
         n_file = len(os.listdir(f"{dir}/{model_name}/"))
         constants = list()
         for i in range(n_file):
-            file = open(f"{dir}/{model_name}/{model_name}_{i}.pkl", "rb")
+            if not deploy and model_name == "clip":
+                if i == 0:
+                    filename = f"{dir}/clip/uncond_embeddings.pkl"
+                else:
+                    filename = f"{dir}/{model_name}/{model_name}_{i - 1}.pkl"
+            else:
+                filename = f"{dir}/{model_name}/{model_name}_{i}.pkl"
+            file = open(filename, "rb")
             const = pickle.load(file)
             file.close()
             constants.append(tvm.nd.array(const, device=dev))

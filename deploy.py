@@ -5,7 +5,6 @@ from transformers import CLIPTokenizer
 from scheduler import PNDMScheduler
 
 import tvm
-import torch
 from tvm import relax
 
 from pipeline import TVMSDPipeline
@@ -22,7 +21,9 @@ def _parse_args():
 
 def deploy_to_pipeline(const_params_dir, lib_path):
     dev = tvm.metal()
-    const_params_dict = load_constant_from_file(dir=const_params_dir, dev=dev)
+    const_params_dict = load_constant_from_file(
+        dir=const_params_dir, dev=dev, deploy=True
+    )
 
     ex = tvm.runtime.load_module(lib_path)
     vm = relax.VirtualMachine(ex, dev)
@@ -32,7 +33,6 @@ def deploy_to_pipeline(const_params_dir, lib_path):
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
         scheduler=PNDMScheduler(dev),
         tvm_device=dev,
-        torch_device=torch.device("mps"),
         param_dict=const_params_dict,
     )
 

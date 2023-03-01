@@ -1,6 +1,4 @@
-import inspect
-from typing import List, Optional, Union
-import logging
+from typing import Optional
 
 import torch
 from transformers import CLIPTokenizer
@@ -11,65 +9,29 @@ from PIL import Image
 import tvm
 from tvm import relax
 
-logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
-
 
 class TVMSDPipeline:
-    r"""
-    Pipeline for text-to-image generation using Stable Diffusion.
-
-    This model inherits from [`DiffusionPipeline`]. Check the superclass documentation for the generic methods the
-    library implements for all the pipelines (such as downloading or saving, running on a particular device, etc.)
-
-    Args:
-        vae ([`AutoencoderKL`]):
-            Variational Auto-Encoder (VAE) Model to encode and decode images to and from latent representations.
-        text_encoder ([`CLIPTextModel`]):
-            Frozen text-encoder. Stable Diffusion uses the text portion of
-            [CLIP](https://huggingface.co/docs/transformers/model_doc/clip#transformers.CLIPTextModel), specifically
-            the [clip-vit-large-patch14](https://huggingface.co/openai/clip-vit-large-patch14) variant.
-        tokenizer (`CLIPTokenizer`):
-            Tokenizer of class
-            [CLIPTokenizer](https://huggingface.co/docs/transformers/v4.21.0/en/model_doc/clip#transformers.CLIPTokenizer).
-        unet ([`UNet2DConditionModel`]): Conditional U-Net architecture to denoise the encoded image latents.
-        scheduler ([`SchedulerMixin`]):
-            A scheduler to be used in combination with `unet` to denoise the encoded image latens. Can be one of
-            [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
-    """
-
     def __init__(
         self,
         vm: relax.VirtualMachine,
         tokenizer: CLIPTokenizer,
         scheduler: PNDMScheduler,
         tvm_device,
-        torch_device,
         param_dict,
     ):
-        def _tvm_to_torch(data):
-            if isinstance(data, tvm.ir.Array):
-                return [_tvm_to_torch(i) for i in data]
-            return torch.from_numpy(data.numpy()).to(torch_device)
-
         def wrapper(f, params):
             def wrapped_f(*args):
-                new_args = []
-                for arg in args:
-                    np_arg = arg.cpu().numpy()
-                    new_args.append(tvm.nd.array(np_arg, tvm_device))
-
-                return _tvm_to_torch(f(*new_args, params))
+                return f(*args, params)
 
             return wrapped_f
 
         self.vm = vm
-        self.clip = wrapper(vm["clip"], param_dict["clip"])
-        self.vae = wrapper(vm["vae"], param_dict["vae"])
-        self.unet = wrapper(vm["unet"], param_dict["unet"])
+        self.clip_to_text_embeddings = wrapper(vm["clip"], param_dict["clip"])
+        self.unet_latents_to_noise_pred = wrapper(vm["unet"], param_dict["unet"])
+        self.vae_to_image = wrapper(vm["vae"], param_dict["vae"])
         self.tokenizer = tokenizer
         self.scheduler = scheduler
         self.tvm_device = tvm_device
-        self.torch_device = torch_device
         self.param_dict = param_dict
 
     @staticmethod
@@ -93,71 +55,15 @@ class TVMSDPipeline:
 
     def __call__(
         self,
-        prompt: Union[str, List[str]],
-        height: int = 512,
-        width: int = 512,
-        num_inference_steps: int = 50,
-        guidance_scale: float = 7.5,
-        negative_prompt: Optional[Union[str, List[str]]] = None,
-        num_images_per_prompt: Optional[int] = 1,
-        eta: float = 0.0,
-        generator: Optional[torch.Generator] = None,
-        latents: Optional[torch.FloatTensor] = None,
+        prompt: str,
         output_type: Optional[str] = "pil",
     ):
-        r"""
-        Function invoked when calling the pipeline for generation.
+        # batch_size = 1
+        # height = 512
+        # width = 512
+        num_inference_steps = 50
 
-        Args:
-            prompt (`str` or `List[str]`):
-                The prompt or prompts to guide the image generation.
-            height (`int`, *optional*, defaults to 512):
-                The height in pixels of the generated image.
-            width (`int`, *optional*, defaults to 512):
-                The width in pixels of the generated image.
-            num_inference_steps (`int`, *optional*, defaults to 50):
-                The number of denoising steps. More denoising steps usually lead to a higher quality image at the
-                expense of slower inference.
-            guidance_scale (`float`, *optional*, defaults to 7.5):
-                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
-                `guidance_scale` is defined as `w` of equation 2. of [Imagen
-                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
-                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
-                usually at the expense of lower image quality.
-            negative_prompt (`str` or `List[str]`, *optional*):
-                The prompt or prompts not to guide the image generation. Ignored when not using guidance (i.e., ignored
-                if `guidance_scale` is less than `1`).
-            num_images_per_prompt (`int`, *optional*, defaults to 1):
-                The number of images to generate per prompt.
-            eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
-                [`schedulers.DDIMScheduler`], will be ignored for others.
-            generator (`torch.Generator`, *optional*):
-                A [torch generator](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make generation
-                deterministic.
-            latents (`torch.FloatTensor`, *optional*):
-                Pre-generated noisy latents, sampled from a Gaussian distribution, to be used as inputs for image
-                generation. Can be used to tweak the same generation with different prompts. If not provided, a latents
-                tensor will ge generated by sampling using the supplied random `generator`.
-            output_type (`str`, *optional*, defaults to `"pil"`):
-                The output format of the generate image. Choose between
-                [PIL](https://pillow.readthedocs.io/en/stable/): `PIL.Image.Image` or `np.array`.
-        """
-
-        if isinstance(prompt, str):
-            batch_size = 1
-        elif isinstance(prompt, list):
-            batch_size = len(prompt)
-        else:
-            raise ValueError(
-                f"`prompt` has to be of type `str` or `list` but is {type(prompt)}"
-            )
-
-        if height % 8 != 0 or width % 8 != 0:
-            raise ValueError(
-                f"`height` and `width` have to be divisible by 8 but are {height} and {width}."
-            )
-
+        # Using torch Tensor
         # get prompt text embeddings
         text_inputs = self.tokenizer(
             prompt,
@@ -166,134 +72,27 @@ class TVMSDPipeline:
             return_tensors="pt",
         )
         text_input_ids = text_inputs.input_ids.to(torch.int32)
-
         if text_input_ids.shape[-1] > self.tokenizer.model_max_length:
-            removed_text = self.tokenizer.batch_decode(
-                text_input_ids[:, self.tokenizer.model_max_length :]
-            )
-            logger.warning(
-                "The following part of your input was truncated because CLIP can only handle sequences up to"
-                f" {self.tokenizer.model_max_length} tokens: {removed_text}"
-            )
             text_input_ids = text_input_ids[:, : self.tokenizer.model_max_length]
-        text_embeddings = self.clip(text_input_ids.to(self.torch_device))[0]
 
-        # duplicate text embeddings for each generation per prompt
-        text_embeddings = text_embeddings.repeat_interleave(
-            num_images_per_prompt, dim=0
+        # Using TVM NDArray
+        text_input_ids = tvm.nd.array(text_input_ids.cpu().numpy(), self.tvm_device)
+        text_embeddings = self.clip_to_text_embeddings(text_input_ids)[0]
+        latents = torch.randn(
+            # (batch_size * number_images_per_prompt, unet.in_channel, height // 8, width // 8)
+            (1, 4, 64, 64),
+            device="cpu",
+            dtype=torch.float32,
         )
-
-        # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
-        # corresponds to doing no classifier free guidance.
-        do_classifier_free_guidance = guidance_scale > 1.0
-        # get unconditional embeddings for classifier free guidance
-        if do_classifier_free_guidance:
-            uncond_tokens: List[str]
-            if negative_prompt is None:
-                uncond_tokens = [""]
-            elif type(prompt) is not type(negative_prompt):
-                raise TypeError(
-                    "`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    " {type(prompt)}."
-                )
-            elif isinstance(negative_prompt, str):
-                uncond_tokens = [negative_prompt]
-            elif batch_size != len(negative_prompt):
-                raise ValueError(
-                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
-            else:
-                uncond_tokens = negative_prompt
-
-            max_length = text_input_ids.shape[-1]
-            uncond_input = self.tokenizer(
-                uncond_tokens,
-                padding="max_length",
-                max_length=max_length,
-                truncation=True,
-                return_tensors="pt",
-            )
-            uncond_embeddings = self.clip(
-                uncond_input.input_ids.to(torch.int32).to(self.torch_device)
-            )[0]
-
-            # duplicate unconditional embeddings for each generation per prompt
-            uncond_embeddings = uncond_embeddings.repeat_interleave(
-                batch_size * num_images_per_prompt, dim=0
-            )
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-
-        # get the initial random noise unless the user supplied it
-
-        # Unlike in other pipelines, latents need to be generated in the target device
-        # for 1-to-1 results reproducibility with the CompVis implementation.
-        # However this currently doesn't work in `mps`.
-        latents_shape = (
-            batch_size * num_images_per_prompt,
-            4,  # unet in_channel
-            height // 8,
-            width // 8,
-        )
-        latents_dtype = text_embeddings.dtype
-        if latents is None:
-            if self.torch_device.type == "mps":
-                # randn does not exist on mps
-                latents = torch.randn(
-                    latents_shape,
-                    generator=generator,
-                    device="cpu",
-                    dtype=latents_dtype,
-                ).to(self.torch_device)
-            else:
-                latents = torch.randn(
-                    latents_shape,
-                    generator=generator,
-                    device=self.torch_device,
-                    dtype=latents_dtype,
-                )
-        else:
-            if latents.shape != latents_shape:
-                raise ValueError(
-                    f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}"
-                )
-            latents = latents.to(self.torch_device)
+        latents = tvm.nd.array(latents.numpy(), self.tvm_device)
 
         for i in tqdm(range(num_inference_steps)):
             t = self.scheduler.scheduler_consts[i][0]
-            t = torch.from_numpy(t.numpy()).to(self.torch_device)
-            # expand the latents if we are doing classifier free guidance
-            latent_model_input = (
-                torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-            )
-
-            # predict the noise residual
-            noise_pred = self.unet(latent_model_input, t, text_embeddings)
-
-            # perform guidance
-            if do_classifier_free_guidance:
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + guidance_scale * (
-                    noise_pred_text - noise_pred_uncond
-                )
-
-            # compute the previous noisy sample x_t -> x_t-1
-            noise_pred = tvm.nd.array(noise_pred.cpu().numpy(), device=self.tvm_device)
-            latents = tvm.nd.array(latents.cpu().numpy(), device=self.tvm_device)
+            noise_pred = self.unet_latents_to_noise_pred(latents, t, text_embeddings)
             latents = self.scheduler.step(self.vm, noise_pred, latents, i)
-            latents = torch.from_numpy(latents.numpy()).to(self.torch_device)
 
-        latents = 1 / 0.18215 * latents
-        image = self.vae(latents)
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
+        image = self.vae_to_image(latents)
+        image = image.numpy()
 
         if output_type == "pil":
             image = self.numpy_to_pil(image)

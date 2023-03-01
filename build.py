@@ -62,7 +62,9 @@ def build(
 
         dev_cpu = tvm.cpu()
         vm_cpu = relax.vm.VirtualMachine(rt_mod=ex, device=dev_cpu)
-        weight_dict = load_constant_from_file("model_weights", dev=dev_cpu)
+        weight_dict = load_constant_from_file(
+            "model_weights", dev=dev_cpu, deploy=False
+        )
         param_dict = compute_params(vm_cpu, weight_dict)
         for model_name in model_names:
             dir_path = f"{const_params_dir}/{model_name}"
