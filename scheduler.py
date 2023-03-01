@@ -49,8 +49,8 @@ class PNDMScheduler:
         if counter == 0:
             self.cur_sample = sample
             prev_latents = vm["scheduler_step_0"](
-                sample,
                 model_output,
+                sample,
                 sample_coeff,
                 alpha_diff,
                 model_output_denom_coeff,
