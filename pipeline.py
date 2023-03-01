@@ -4,7 +4,7 @@ import logging
 
 import torch
 from transformers import CLIPTokenizer
-from diffusers import PNDMScheduler
+from scheduler import PNDMScheduler
 from tqdm import tqdm
 from PIL import Image
 
@@ -62,11 +62,13 @@ class TVMSDPipeline:
 
             return wrapped_f
 
+        self.vm = vm
         self.clip = wrapper(vm["clip"], param_dict["clip"])
         self.vae = wrapper(vm["vae"], param_dict["vae"])
         self.unet = wrapper(vm["unet"], param_dict["unet"])
         self.tokenizer = tokenizer
         self.scheduler = scheduler
+        self.tvm_device = tvm_device
         self.torch_device = torch_device
         self.param_dict = param_dict
 
@@ -214,9 +216,9 @@ class TVMSDPipeline:
                 truncation=True,
                 return_tensors="pt",
             )
-            uncond_embeddings = self.clip(uncond_input.input_ids.to(torch.int32).to(self.torch_device))[
-                0
-            ]
+            uncond_embeddings = self.clip(
+                uncond_input.input_ids.to(torch.int32).to(self.torch_device)
+            )[0]
 
             # duplicate unconditional embeddings for each generation per prompt
             uncond_embeddings = uncond_embeddings.repeat_interleave(
@@ -263,33 +265,13 @@ class TVMSDPipeline:
                 )
             latents = latents.to(self.torch_device)
 
-        # set timesteps
-        self.scheduler.set_timesteps(num_inference_steps)
-
-        # Some schedulers like PNDM have timesteps as arrays
-        # It's more optimized to move all timesteps to correct device beforehand
-        timesteps_tensor = self.scheduler.timesteps.to(torch.int32).to(self.torch_device)
-
-        # scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * self.scheduler.init_noise_sigma
-
-        # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
-        # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
-        # and should be between [0, 1]
-        accepts_eta = "eta" in set(
-            inspect.signature(self.scheduler.step).parameters.keys()
-        )
-        extra_step_kwargs = {}
-        if accepts_eta:
-            extra_step_kwargs["eta"] = eta
-
-        for i, t in enumerate(tqdm(timesteps_tensor)):
+        for i in tqdm(range(num_inference_steps)):
+            t = self.scheduler.scheduler_consts[i][0]
+            t = torch.from_numpy(t.numpy()).to(self.torch_device)
             # expand the latents if we are doing classifier free guidance
             latent_model_input = (
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
-            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
             # predict the noise residual
             noise_pred = self.unet(latent_model_input, t, text_embeddings)
@@ -302,9 +284,10 @@ class TVMSDPipeline:
                 )
 
             # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(
-                noise_pred, t, latents, **extra_step_kwargs
-            ).prev_sample
+            noise_pred = tvm.nd.array(noise_pred.cpu().numpy(), device=self.tvm_device)
+            latents = tvm.nd.array(latents.cpu().numpy(), device=self.tvm_device)
+            latents = self.scheduler.step(self.vm, noise_pred, latents, i)
+            latents = torch.from_numpy(latents.numpy()).to(self.torch_device)
 
         latents = 1 / 0.18215 * latents
         image = self.vae(latents)

@@ -2,7 +2,7 @@ import argparse
 import time
 
 from transformers import CLIPTokenizer
-from diffusers import PNDMScheduler
+from scheduler import PNDMScheduler
 
 import tvm
 import torch
@@ -30,9 +30,7 @@ def deploy_to_pipeline(const_params_dir, lib_path):
     pipe = TVMSDPipeline(
         vm=vm,
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
-        scheduler=PNDMScheduler.from_pretrained(
-            "CompVis/stable-diffusion-v1-4", subfolder="scheduler"
-        ),
+        scheduler=PNDMScheduler(dev),
         tvm_device=dev,
         torch_device=torch.device("mps"),
         param_dict=const_params_dict,
