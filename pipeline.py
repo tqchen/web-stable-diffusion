@@ -56,8 +56,6 @@ class TVMSDPipeline:
                 new_args = []
                 for arg in args:
                     np_arg = arg.cpu().numpy()
-                    if np_arg.shape == ():
-                        np_arg = [np_arg.item()]
                     new_args.append(tvm.nd.array(np_arg, tvm_device))
 
                 return _tvm_to_torch(f(*new_args, params))
@@ -165,7 +163,7 @@ class TVMSDPipeline:
             max_length=self.tokenizer.model_max_length,  # 77
             return_tensors="pt",
         )
-        text_input_ids = text_inputs.input_ids
+        text_input_ids = text_inputs.input_ids.to(torch.int32)
 
         if text_input_ids.shape[-1] > self.tokenizer.model_max_length:
             removed_text = self.tokenizer.batch_decode(
@@ -216,7 +214,7 @@ class TVMSDPipeline:
                 truncation=True,
                 return_tensors="pt",
             )
-            uncond_embeddings = self.clip(uncond_input.input_ids.to(self.torch_device))[
+            uncond_embeddings = self.clip(uncond_input.input_ids.to(torch.int32).to(self.torch_device))[
                 0
             ]
 
@@ -270,7 +268,7 @@ class TVMSDPipeline:
 
         # Some schedulers like PNDM have timesteps as arrays
         # It's more optimized to move all timesteps to correct device beforehand
-        timesteps_tensor = self.scheduler.timesteps.to(self.torch_device)
+        timesteps_tensor = self.scheduler.timesteps.to(torch.int32).to(self.torch_device)
 
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
