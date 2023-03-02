@@ -31,6 +31,7 @@ class MetalWrapper:
         self.clip = wrapper(vm["clip"], param_dict["clip"], tvm_device)
         self.vae = wrapper(vm["vae"], param_dict["vae"], tvm_device)
         self.unet = wrapper(vm["unet"], param_dict["unet"], tvm_device)
+        self.scheduler_vm = vm
 
 class WebGPUWrapper:
     def __init__(self, wasm_path):
@@ -52,6 +53,7 @@ class WebGPUWrapper:
         self.clip = remote_wrapper(remote, vm, "clip", meta_data["clip_param_size"], dev)
         self.unet = remote_wrapper(remote, vm, "unet", meta_data["unet_param_size"], dev)
         self.vae = remote_wrapper(remote, vm, "vae", meta_data["vae_param_size"], dev)
+        self.scheduler_vm = vm
         print("Finish initialization")
 
 

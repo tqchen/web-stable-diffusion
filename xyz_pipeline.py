@@ -28,6 +28,7 @@ class TVMSDPipeline:
         self.tokenizer = tokenizer
         self.scheduler = scheduler
         self.tvm_device = tvm_device
+        self.scheduler_vm = wrapped.scheduler_vm
 
     def __call__(
         self,
@@ -65,7 +66,7 @@ class TVMSDPipeline:
         for i in tqdm(range(num_inference_steps)):
             t = self.scheduler.scheduler_consts[i][0]
             noise_pred = self.unet_latents_to_noise_pred(latents, t, text_embeddings)
-            latents = self.scheduler.step(self.vm, noise_pred, latents, i)
+            latents = self.scheduler.step(self.scheduler_vm, noise_pred, latents, i)
 
         image = self.vae_to_image(latents)
         image = image.numpy()
