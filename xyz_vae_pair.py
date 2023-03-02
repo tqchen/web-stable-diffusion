@@ -25,9 +25,9 @@ def build_metal():
 
 proxy_host = "127.0.0.1"
 proxy_port = 9090
+wasm_path = "build/vae.wasm"
 
 def build_webgpu(skip_build):
-    wasm_path = "build/vae.wasm"
     nparams = int(json.load(open(
         "../tvm/web/.ndarray_cache/sd-webgpu-v1-5/ndarray-cache.json", "r"))["meta_data"]["vae_param_size"])
     print(f"nparams={nparams}")
@@ -79,6 +79,18 @@ def main_metal():
     image = image.cpu().numpy()
     image = numpy_to_pil(image)
     image[0].save("build/vae_pair_metal.png")
+ß
+def main_show_image():
+    wasm_binary = open(wasm_path, "rb").read()
+    remote = rpc.connect(
+        proxy_host,
+        proxy_port,
+        key="wasm",
+        session_constructor_args=["rpc.WasmSession", wasm_binary],
+    )
+    latents = torch.load("intermediate/vae_image_webgpu.pt")
+    data = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
+    remote.get_function("showImage")(data)
+    print("finish")
 
-
-main_webgpu()
+main_show_image()
