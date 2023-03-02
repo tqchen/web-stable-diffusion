@@ -100,4 +100,4 @@ class TVMPNDMScheduler:
                 self.ets[-1],
             )
 
-        return prev_latents[0]
+        return prev_latents

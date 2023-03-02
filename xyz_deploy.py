@@ -32,13 +32,15 @@ class MetalWrapper:
         self.vae = wrapper(vm, "vae", param_dict["vae"], tvm_device)
         self.unet = wrapper(vm, "unet", param_dict["unet"], tvm_device)
         self.scheduler_vm = vm
+        self.scheduler = TVMPNDMScheduler(tvm_device)
+
 
 class WebGPUWrapper:
     def __init__(self, wasm_path):
         proxy_host = "127.0.0.1"
         proxy_port = 9090
         meta_data = json.load(open(
-            "../tvm/web/.ndarray_cache/sd-metal-v1-5/ndarray-cache.json", "r"))["meta_data"]
+            "../tvm/web/.ndarray_cache/sd-webgpu-v1-5/ndarray-cache.json", "r"))["meta_data"]
 
         wasm_binary = open(wasm_path, "rb").read()
         remote = rpc.connect(
@@ -54,6 +56,7 @@ class WebGPUWrapper:
         self.unet = remote_wrapper(remote, vm, "unet", meta_data["unet_param_size"], dev)
         self.vae = remote_wrapper(remote, vm, "vae", meta_data["vae_param_size"], dev)
         self.scheduler_vm = vm
+        self.scheduler = TVMPNDMScheduler(dev)
         print("Finish initialization")
 
 
@@ -65,18 +68,20 @@ def deploy(lib_path, cache_path, mode):
         vm = relax.VirtualMachine(ex, dev)
         return  MetalWrapper(vm, param_dict, dev)
 
-    # wgpu_wrapper = WebGPUWrapper("build/vae.wasm", torch_device)
+    # wgpu_wrapper = WebGPUWrapper("build/vae.wasm")
     metal_wrapper = get_metel_wrapper(tvm.metal())
 
     wrapper = metal_wrapper
-    # wrapper.clip = metal_wrapper.clip
-    #wrapper.unet = metal_wrapper.unet
+    wrapper.clip = metal_wrapper.clip
+    wrapper.unet = metal_wrapper.unet
+    # wrapper.scheduler_vm = metal_wrapper.scheduler_vm
+
     # wrapper.vae = metal_wrapper.vae
 
     pipe = TVMSDPipeline(
         wrapper,
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
-        scheduler=TVMPNDMScheduler(tvm_device),
+        scheduler= wrapper.scheduler,
         tvm_device=tvm_device
     )
 
