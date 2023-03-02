@@ -31,9 +31,10 @@ class MetalWrapper:
         self.clip = wrapper(vm, "clip", param_dict["clip"], tvm_device)
         self.vae = wrapper(vm, "vae", param_dict["vae"], tvm_device)
         self.unet = wrapper(vm, "unet", param_dict["unet"], tvm_device)
-        self.scheduler_vm = vm
         self.scheduler = TVMPNDMScheduler(tvm_device)
-
+        for i in range(5):
+            fn_name = f"scheduler_step_{i}"
+            self.scheduler.wrapper[fn_name] = wrapper(vm, fn_name, None, tvm_device)
 
 class WebGPUWrapper:
     def __init__(self, wasm_path):
@@ -55,8 +56,10 @@ class WebGPUWrapper:
         self.clip = remote_wrapper(remote, vm, "clip", meta_data["clip_param_size"], dev)
         self.unet = remote_wrapper(remote, vm, "unet", meta_data["unet_param_size"], dev)
         self.vae = remote_wrapper(remote, vm, "vae", meta_data["vae_param_size"], dev)
-        self.scheduler_vm = vm
         self.scheduler = TVMPNDMScheduler(dev)
+        for i in range(5):
+            fn_name = f"scheduler_step_{i}"
+            self.scheduler.wrapper[fn_name] = remote_wrapper(remote, vm, fn_name, 0, dev)
         print("Finish initialization")
 
 
@@ -81,7 +84,6 @@ def deploy(lib_path, cache_path, mode):
     pipe = TVMSDPipeline(
         wrapper,
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
-        scheduler= wrapper.scheduler,
         tvm_device=tvm_device
     )
 

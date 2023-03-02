@@ -69,18 +69,21 @@ def torch_wrapper(vm, model, params, tvm_device, torch_device, time_eval=False):
         for arg in args:
             np_arg = arg.cpu().numpy()
             new_args.append(tvm.nd.array(np_arg, tvm_device))
+        if params:
+            new_args.append(params)
 
         if time_eval and len(time_eval_result) == 0:
-            res = vm.time_evaluator(model, tvm_device)(*new_args, params)
+            res = vm.time_evaluator(model, tvm_device)(*new_args)
             time_eval_result.append(res)
             print(f"Local[{model}] on {tvm_device}, time evaluator {model}, {res}")
-        return _tvm_to_torch(vm[model](*new_args, params), torch_device)
+        return _tvm_to_torch(vm[model](*new_args), torch_device)
     return wrapped_f
 
 
 def remote_torch_wrapper(remote, vm, model, nparams, tvm_device, torch_device, time_eval=False):
     pfunc_from_cache = remote.get_function("tvmjs.param_module_from_cache")
-    pfunc = pfunc_from_cache(model, nparams)
+
+    pfunc = pfunc_from_cache(model, nparams) if nparams != 0 else None
     time_eval_result = []
 
     def wrapped_f(*args):
@@ -88,7 +91,14 @@ def remote_torch_wrapper(remote, vm, model, nparams, tvm_device, torch_device, t
         for arg in args:
             np_arg = arg.cpu().numpy()
             new_args.append(tvm.nd.array(np_arg, tvm_device))
-        vm.module["set_input_with_param_module"](model, *new_args, pfunc)
+        if pfunc:
+            new_args.append(pfunc)
+
+        if pfunc:
+            vm.module["set_input_with_param_module"](model, *new_args)
+        else:
+            vm.module["set_input"](model, *new_args)
+
         vm.invoke_stateful(model)
         if time_eval and len(time_eval_result) == 0:
             res = vm.time_evaluator("invoke_stateful", tvm_device, number=1)(model)
@@ -109,18 +119,19 @@ def tvm_wrapper(vm, model, params, tvm_device, time_eval=False):
             if arg.device != tvm_device:
                 arg = arg.copyto(tvm.cpu()).copyto(tvm_device)
             new_args.append(arg)
-
+        if params:
+            new_args.append(params)
         if time_eval and len(time_eval_result) == 0:
-            res = vm.time_evaluator(model, tvm_device)(*new_args, params)
+            res = vm.time_evaluator(model, tvm_device)(*new_args)
             time_eval_result.append(res)
             print(f"Local[{model}] on {tvm_device}, time evaluator {model}, {res}")
-        return vm[model](*new_args, params)
+        return vm[model](*new_args)
     return wrapped_f
 
 
 def remote_tvm_wrapper(remote, vm, model, nparams, tvm_device, time_eval=False):
     pfunc_from_cache = remote.get_function("tvmjs.param_module_from_cache")
-    pfunc = pfunc_from_cache(model, nparams)
+    pfunc = pfunc_from_cache(model, nparams) if nparams != 0 else None
     time_eval_result = []
 
     def wrapped_f(*args):
@@ -129,7 +140,14 @@ def remote_tvm_wrapper(remote, vm, model, nparams, tvm_device, time_eval=False):
             if arg.device != tvm_device:
                 arg = arg.copyto(tvm.cpu()).copyto(tvm_device)
             new_args.append(arg)
-        vm.module["set_input_with_param_module"](model, *new_args, pfunc)
+        if pfunc:
+            new_args.append(pfunc)
+
+        if pfunc:
+            vm.module["set_input_with_param_module"](model, *new_args)
+        else:
+            vm.module["set_input"](model, *new_args)
+
         vm.invoke_stateful(model)
         if time_eval and len(time_eval_result) == 0:
             res = vm.time_evaluator("invoke_stateful", tvm_device, number=1)(model)

@@ -26,14 +26,13 @@ class TVMPNDMScheduler:
                         )
                     )
                 self.scheduler_consts.append(consts)
-
+        self.wrapper = {}
         self.ets: List[tvm.nd.NDArray] = []
         self.cur_sample: tvm.nd.NDArray
         self.device = dev
 
     def step(
         self,
-        vm: relax.VirtualMachine,
         model_output: tvm.nd.NDArray,
         sample: tvm.nd.NDArray,
         counter: int,
@@ -53,7 +52,7 @@ class TVMPNDMScheduler:
 
         if counter == 0:
             self.cur_sample = sample
-            prev_latents = vm["scheduler_step_0"](
+            prev_latents = self.wrapper["scheduler_step_0"](
                 model_output,
                 sample,
                 sample_coeff,
@@ -61,7 +60,7 @@ class TVMPNDMScheduler:
                 model_output_denom_coeff,
             )
         elif counter == 1:
-            prev_latents = vm["scheduler_step_1"](
+            prev_latents = self.wrapper["scheduler_step_1"](
                 model_output,
                 self.cur_sample,
                 sample_coeff,
@@ -70,7 +69,7 @@ class TVMPNDMScheduler:
                 self.ets[-1],
             )
         elif counter == 2:
-            prev_latents = vm["scheduler_step_2"](
+            prev_latents = self.wrapper["scheduler_step_2"](
                 sample,
                 sample_coeff,
                 alpha_diff,
@@ -79,7 +78,7 @@ class TVMPNDMScheduler:
                 self.ets[-1],
             )
         elif counter == 3:
-            prev_latents = vm["scheduler_step_3"](
+            prev_latents = self.wrapper["scheduler_step_3"](
                 sample,
                 sample_coeff,
                 alpha_diff,
@@ -89,7 +88,7 @@ class TVMPNDMScheduler:
                 self.ets[-1],
             )
         else:
-            prev_latents = vm["scheduler_step_4"](
+            prev_latents = self.wrapper["scheduler_step_4"](
                 sample,
                 sample_coeff,
                 alpha_diff,
