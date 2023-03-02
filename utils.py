@@ -108,7 +108,12 @@ def tvm_wrapper(vm, model, params, tvm_device, time_eval=False):
     time_eval_result = []
 
     def wrapped_f(*args):
-        new_args = args
+        new_args = []
+        for arg in args:
+            if arg.device != tvm_device:
+                arg = arg.copyto(tvm.cpu()).copyto(tvm_device)
+            new_args.append(arg)
+
         if time_eval and len(time_eval_result) == 0:
             res = vm.time_evaluator(model, tvm_device)(*new_args, params)
             time_eval_result.append(res)
@@ -123,7 +128,11 @@ def remote_tvm_wrapper(remote, vm, model, nparams, tvm_device, time_eval=False):
     time_eval_result = []
 
     def wrapped_f(*args):
-        new_args = args
+        new_args = []
+        for arg in args:
+            if arg.device != tvm_device:
+                arg = arg.copyto(tvm.cpu()).copyto(tvm_device)
+            new_args.append(arg)
         vm.module["set_input_with_param_module"](model, *new_args, pfunc)
         vm.invoke_stateful(model)
         if time_eval and len(time_eval_result) == 0:

@@ -29,6 +29,7 @@ class TVMPNDMScheduler:
 
         self.ets: List[tvm.nd.NDArray] = []
         self.cur_sample: tvm.nd.NDArray
+        self.device = dev
 
     def step(
         self,
@@ -45,6 +46,10 @@ class TVMPNDMScheduler:
         sample_coeff = consts[1]
         alpha_diff = consts[2]
         model_output_denom_coeff = consts[3]
+
+        if model_output.device != self.device:
+            model_output = model_output.copyto(tvm.cpu()).copyto(self.device)
+            sample = sample.copyto(tvm.cpu()).copyto(self.device)
 
         if counter == 0:
             self.cur_sample = sample
