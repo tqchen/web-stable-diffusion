@@ -1,11 +1,10 @@
 from typing import Dict, List
-
 import argparse
 import time
 
 from transformers import CLIPTokenizer
-from diffusers import PNDMScheduler, EulerDiscreteScheduler
 
+from xyz_scheduler import TVMPNDMScheduler
 import numpy as np
 import tvm
 import torch
@@ -13,28 +12,28 @@ from tvm import relax, rpc
 import json
 
 from tvm.contrib import tvmjs
-from utils import load_params, wrapper, remote_wrapper
+from utils import load_params, torch_wrapper, remote_tvm_wrapper as remote_wrapper
 from xyz_pipeline import TVMSDPipeline
 
 
 def _parse_args():
     args = argparse.ArgumentParser()
     args.add_argument("--lib-path", type=str, default="module.so")
-    args.add_argument("--mode", type=str, default="webgpu")
+    args.add_argument("--mode", type=str, default="metal")
     args.add_argument("--ndarray-cache-path", type=str,
-                      default="../tvm/web/.ndarray_cache/sd-metal-v1-5")
+                      default="../tvm/web/.ndarray_cache/sd-webgpu-v1-5")
     parsed = args.parse_args()
     return parsed
 
 
 class MetalWrapper:
-    def __init__(self, vm, param_dict, tvm_device, torch_device):
-        self.clip = wrapper(vm["clip"], param_dict["clip"], tvm_device, torch_device)
-        self.vae = wrapper(vm["vae"], param_dict["vae"], tvm_device, torch_device)
-        self.unet = wrapper(vm["unet"], param_dict["unet"], tvm_device, torch_device)
+    def __init__(self, vm, param_dict, tvm_device):
+        self.clip = wrapper(vm["clip"], param_dict["clip"], tvm_device)
+        self.vae = wrapper(vm["vae"], param_dict["vae"], tvm_device)
+        self.unet = wrapper(vm["unet"], param_dict["unet"], tvm_device)
 
 class WebGPUWrapper:
-    def __init__(self, wasm_path, torch_device):
+    def __init__(self, wasm_path):
         proxy_host = "127.0.0.1"
         proxy_port = 9090
         meta_data = json.load(open(
@@ -50,26 +49,24 @@ class WebGPUWrapper:
         dev = remote.webgpu(0)
         vm = relax.VirtualMachine(remote.system_lib(), device=dev)
 
-        self.clip = remote_wrapper(remote, vm, "clip", meta_data["clip_param_size"], dev, torch_device)
-        self.unet = remote_wrapper(remote, vm, "unet", meta_data["unet_param_size"], dev, torch_device)
-        self.vae = remote_wrapper(remote, vm, "vae", meta_data["vae_param_size"], dev, torch_device)
+        self.clip = remote_wrapper(remote, vm, "clip", meta_data["clip_param_size"], dev)
+        self.unet = remote_wrapper(remote, vm, "unet", meta_data["unet_param_size"], dev)
+        self.vae = remote_wrapper(remote, vm, "vae", meta_data["vae_param_size"], dev)
         print("Finish initialization")
 
 
 def deploy(lib_path, cache_path, mode):
-    torch_device=torch.device("mps")
-    def get_metel_wrapper():
-        dev = tvm.metal()
+    tvm_device = tvm.metal()
+    def get_metel_wrapper(dev):
         param_dict = load_params(cache_path, dev)
-
         ex = tvm.runtime.load_module(lib_path)
         vm = relax.VirtualMachine(ex, dev)
-        return  MetalWrapper(vm, param_dict, dev, torch_device)
+        return  MetalWrapper(vm, param_dict, dev)
 
-    wgpu_wrapper = WebGPUWrapper("build/vae.wasm", torch_device)
-    metal_wrapper = get_metel_wrapper()
+    # wgpu_wrapper = WebGPUWrapper("build/vae.wasm", torch_device)
+    metal_wrapper = get_metel_wrapper(tvm.metal())
 
-    wrapper = wgpu_wrapper
+    wrapper = metal_wrapper
     # wrapper.clip = metal_wrapper.clip
     #wrapper.unet = metal_wrapper.unet
     # wrapper.vae = metal_wrapper.vae
@@ -77,10 +74,8 @@ def deploy(lib_path, cache_path, mode):
     pipe = TVMSDPipeline(
         wrapper,
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
-        scheduler=PNDMScheduler.from_pretrained(
-            "runwayml/stable-diffusion-v1-5", subfolder="scheduler"
-        ),
-        torch_device=torch_device,
+        scheduler=PNDMScheduler(tvm_device),
+        tvm_device=tvm_device
     )
 
     prompt = "A photo of an astronaut riding a horse on mars"

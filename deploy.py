@@ -3,7 +3,6 @@ import time
 
 from transformers import CLIPTokenizer
 from scheduler import PNDMScheduler
-
 import tvm
 from tvm import relax
 

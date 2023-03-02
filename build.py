@@ -30,6 +30,7 @@ def build(
     output,
 ):
     model_names = ["clip", "vae", "unet"]
+
     scheduler_func_names = [f"scheduler_step_{i}" for i in range(5)]
 
     # Build the main functions.

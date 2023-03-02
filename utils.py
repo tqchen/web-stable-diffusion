@@ -60,7 +60,8 @@ def _tvm_to_torch(data, torch_device):
         return [_tvm_to_torch(i, torch_device) for i in data]
     return torch.from_numpy(data.numpy()).to(torch_device)
 
-def wrapper(vm, model, params, tvm_device, torch_device, time_eval=False):
+
+def torch_wrapper(vm, model, params, tvm_device, torch_device, time_eval=False):
     time_eval_result = []
 
     def wrapped_f(*args):
@@ -79,7 +80,7 @@ def wrapper(vm, model, params, tvm_device, torch_device, time_eval=False):
     return wrapped_f
 
 
-def remote_wrapper(remote, vm, model, nparams, tvm_device, torch_device, time_eval=False):
+def remote_torch_wrapper(remote, vm, model, nparams, tvm_device, torch_device, time_eval=False):
     pfunc_from_cache = remote.get_function("tvmjs.param_module_from_cache")
     pfunc = pfunc_from_cache(model, nparams)
     time_eval_result = []
@@ -100,6 +101,38 @@ def remote_wrapper(remote, vm, model, nparams, tvm_device, torch_device, time_ev
 
         results = vm.get_outputs(model)
         return _tvm_to_torch(results, torch_device)
+    return wrapped_f
+
+
+def tvm_wrapper(vm, model, params, tvm_device, time_eval=False):
+    time_eval_result = []
+
+    def wrapped_f(*args):
+        new_args = args
+        if time_eval and len(time_eval_result) == 0:
+            res = vm.time_evaluator(model, tvm_device)(*new_args, params)
+            time_eval_result.append(res)
+            print(f"Local[{model}] on {tvm_device}, time evaluator {model}, {res}")
+        return vm[model](*new_args, params)
+    return wrapped_f
+
+
+def remote_tvm_wrapper(remote, vm, model, nparams, tvm_device, time_eval=False):
+    pfunc_from_cache = remote.get_function("tvmjs.param_module_from_cache")
+    pfunc = pfunc_from_cache(model, nparams)
+    time_eval_result = []
+
+    def wrapped_f(*args):
+        new_args = args
+        vm.module["set_input_with_param_module"](model, *new_args, pfunc)
+        vm.invoke_stateful(model)
+        if time_eval and len(time_eval_result) == 0:
+            res = vm.time_evaluator("invoke_stateful", tvm_device, number=1)(model)
+            time_eval_result.append(res)
+            print(f"Remote[{model}] on {tvm_device}, {res}")
+
+        return vm.get_outputs(model)
+
     return wrapped_f
 
 

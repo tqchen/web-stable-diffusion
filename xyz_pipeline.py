@@ -53,7 +53,7 @@ class TVMSDPipeline:
 
         # Using TVM NDArray
         text_input_ids = tvm.nd.array(text_input_ids.cpu().numpy(), self.tvm_device)
-        text_embeddings = self.clip_to_text_embeddings(text_input_ids)[0]
+        text_embeddings = self.clip_to_text_embeddings(text_input_ids)
         latents = torch.randn(
             # (batch_size * number_images_per_prompt, unet.in_channel, height // 8, width // 8)
             (1, 4, 64, 64),
@@ -74,4 +74,3 @@ class TVMSDPipeline:
             image = numpy_to_pil(image)
 
         return image
-
