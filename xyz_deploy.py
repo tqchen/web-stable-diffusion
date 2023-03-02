@@ -12,7 +12,7 @@ from tvm import relax, rpc
 import json
 
 from tvm.contrib import tvmjs
-from utils import load_params, torch_wrapper, remote_tvm_wrapper as remote_wrapper
+from utils import load_params, tvm_wrapper as wrapper, remote_tvm_wrapper as remote_wrapper
 from xyz_pipeline import TVMSDPipeline
 
 
@@ -28,9 +28,9 @@ def _parse_args():
 
 class MetalWrapper:
     def __init__(self, vm, param_dict, tvm_device):
-        self.clip = wrapper(vm["clip"], param_dict["clip"], tvm_device)
-        self.vae = wrapper(vm["vae"], param_dict["vae"], tvm_device)
-        self.unet = wrapper(vm["unet"], param_dict["unet"], tvm_device)
+        self.clip = wrapper(vm, "clip", param_dict["clip"], tvm_device)
+        self.vae = wrapper(vm, "vae", param_dict["vae"], tvm_device)
+        self.unet = wrapper(vm, "unet", param_dict["unet"], tvm_device)
         self.scheduler_vm = vm
 
 class WebGPUWrapper:
@@ -76,7 +76,7 @@ def deploy(lib_path, cache_path, mode):
     pipe = TVMSDPipeline(
         wrapper,
         tokenizer=CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14"),
-        scheduler=PNDMScheduler(tvm_device),
+        scheduler=TVMPNDMScheduler(tvm_device),
         tvm_device=tvm_device
     )
 
