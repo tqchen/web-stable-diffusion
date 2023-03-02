@@ -60,8 +60,7 @@ def main_webgpu():
     image = vae(latents)
     torch.save(image, "intermediate/vae_image_webgpu.pt")
     print("finish exec")
-    image = (image / 2 + 0.5).clamp(0, 1)
-    image = image.cpu().permute(0, 2, 3, 1).numpy()
+    image = image.cpu().numpy()
     image = numpy_to_pil(image)
     image[0].save("build/vae_pair_webgpu.png")
 
@@ -82,4 +81,4 @@ def main_metal():
     image[0].save("build/vae_pair_metal.png")
 
 
-main_metal()
+main_webgpu()
