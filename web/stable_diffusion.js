@@ -1,14 +1,17 @@
-
-
 class StableDiffusionPipeline {
   constructor(tvm) {
     this.tvm = tvm;
     this.image_width = 512;
     this.image_height = 512;
-
     // hold output image
-    this.outputImage = tvm.empty([4, 512, 512], "floa32", tvm.cpu());
+    this.outputImage = tvm.detachFromCurrentScope(
+      tvm.empty([512, 512, 3], "float32", tvm.cpu())
+    );
     this.device = tvm.webgpu();
+  }
+
+  dispose() {
+    this.outputImage.dispose();
   }
 
   /**
@@ -27,11 +30,11 @@ class StableDiffusionPipeline {
   }
 };
 
-async function onServerLoad(tvm) {
+function onServerLoad(tvm) {
   const handler = new StableDiffusionPipeline(tvm);
-  tvm.registerAsyncServerFunction("showImage", async (data) => {
+  tvm.registerAsyncServerFunc("showImage", async (data) => {
     await handler.showImage(data);
   });
 }
 
-tvmGlobalEnv.onServerLoad = onServerLoad;
+tvmjsGlobalEnv.onServerLoad = onServerLoad;

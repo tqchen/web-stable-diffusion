@@ -172,6 +172,6 @@ def numpy_to_pil(images):
             Image.fromarray(image.squeeze(), mode="L") for image in images
         ]
     else:
-        pil_images = [Image.fromarray(image) for image in images]
+        pil_images = [Image.fromarray(image, mode="RGB") for image in images]
 
     return pil_images

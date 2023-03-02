@@ -79,7 +79,7 @@ def main_metal():
     image = image.cpu().numpy()
     image = numpy_to_pil(image)
     image[0].save("build/vae_pair_metal.png")
-ß
+
 def main_show_image():
     wasm_binary = open(wasm_path, "rb").read()
     remote = rpc.connect(
@@ -88,8 +88,12 @@ def main_show_image():
         key="wasm",
         session_constructor_args=["rpc.WasmSession", wasm_binary],
     )
-    latents = torch.load("intermediate/vae_image_webgpu.pt")
-    data = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
+    latents = torch.load("intermediate/vae_image_metal.pt")
+    rawdata = latents.cpu().numpy()
+    data = tvm.nd.array(rawdata, remote.webgpu(0))
+    print(data.shape)
+    image = numpy_to_pil(rawdata)
+    image[0].save("build/vae_pair_show.png")
     remote.get_function("showImage")(data)
     print("finish")
 
