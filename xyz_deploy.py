@@ -71,13 +71,13 @@ def deploy(lib_path, cache_path, mode):
         vm = relax.VirtualMachine(ex, dev)
         return  MetalWrapper(vm, param_dict, dev)
 
-    # wgpu_wrapper = WebGPUWrapper("build/vae.wasm")
+    wgpu_wrapper = WebGPUWrapper("build/vae.wasm")
     metal_wrapper = get_metel_wrapper(tvm.metal())
 
-    wrapper = metal_wrapper
-    wrapper.clip = metal_wrapper.clip
-    wrapper.unet = metal_wrapper.unet
-    # wrapper.scheduler_vm = metal_wrapper.scheduler_vm
+    wrapper = wgpu_wrapper
+    # wrapper.clip = metal_wrapper.clip
+    # wrapper.unet = metal_wrapper.unet
+    wrapper.scheduler = metal_wrapper.scheduler
 
     # wrapper.vae = metal_wrapper.vae
 
