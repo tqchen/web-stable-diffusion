@@ -68,6 +68,7 @@ class TVMSDPipeline:
             noise_pred = self.unet_latents_to_noise_pred(latents, t, text_embeddings)
             latents = self.scheduler.step(self.scheduler_vm, noise_pred, latents, i)
 
+        torch.save(torch.Tensor(latents.numpy()), "intermediate/latents.pt")
         image = self.vae_to_image(latents)
         image = image.numpy()
 

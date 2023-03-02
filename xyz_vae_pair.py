@@ -12,7 +12,7 @@ from tvm import rpc
 
 import json
 from tvm.contrib import tvmjs
-from utils import numpy_to_pil, wrapper, load_params, remote_wrapper
+from utils import numpy_to_pil, torch_wrapper as wrapper, load_params, remote_torch_wrapper as remote_wrapper
 
 def build_metal():
     import webgpu_module
@@ -29,7 +29,7 @@ proxy_port = 9090
 def build_webgpu(skip_build):
     wasm_path = "build/vae.wasm"
     nparams = int(json.load(open(
-        "../tvm/web/.ndarray_cache/sd-metal-v1-5/ndarray-cache.json", "r"))["meta_data"]["vae_param_size"])
+        "../tvm/web/.ndarray_cache/sd-webgpu-v1-5/ndarray-cache.json", "r"))["meta_data"]["vae_param_size"])
     print(f"nparams={nparams}")
     if not skip_build:
         import webgpu_module
@@ -68,7 +68,7 @@ def main_webgpu():
 
 def main_metal():
     dev = tvm.metal()
-    param_dict = load_params("../tvm/web/.ndarray_cache/sd-metal-v1-5", dev)
+    param_dict = load_params("../tvm/web/.ndarray_cache/sd-webgpu-v1-5", dev)
     latents = torch.load("intermediate/latents.pt")
     print("finish load")
     vm = build_metal()
@@ -77,8 +77,7 @@ def main_metal():
     image = vae(latents)
     torch.save(image, "intermediate/vae_image_metal.pt")
     print("finish exec")
-    image = (image / 2 + 0.5).clamp(0, 1)
-    image = image.cpu().permute(0, 2, 3, 1).numpy()
+    image = image.cpu().numpy()
     image = numpy_to_pil(image)
     image[0].save("build/vae_pair_metal.png")
 

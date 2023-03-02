@@ -68,8 +68,6 @@ def torch_wrapper(vm, model, params, tvm_device, torch_device, time_eval=False):
         new_args = []
         for arg in args:
             np_arg = arg.cpu().numpy()
-            if np_arg.shape == ():
-                np_arg = np_arg.reshape((1,))
             new_args.append(tvm.nd.array(np_arg, tvm_device))
 
         if time_eval and len(time_eval_result) == 0:
@@ -89,8 +87,6 @@ def remote_torch_wrapper(remote, vm, model, nparams, tvm_device, torch_device, t
         new_args = []
         for arg in args:
             np_arg = arg.cpu().numpy()
-            if np_arg.shape == ():
-                np_arg = np_arg.reshape((1,))
             new_args.append(tvm.nd.array(np_arg, tvm_device))
         vm.module["set_input_with_param_module"](model, *new_args, pfunc)
         vm.invoke_stateful(model)
