@@ -13,6 +13,13 @@ class StableDiffusionPipeline {
     this.vm = this.tvm.detachFromCurrentScope(
       this.tvm.createVirtualMachine(this.device)
     );
+
+    this.vaeToImage = this.tvm.detachFromCurrentScope(
+      this.vm.getFunction("vae")
+    );
+    this.vaeParams = this.tvm.detachFromCurrentScope(
+      this.tvm.getParamsFromCache("vae", 140)
+    );
     this.imageToRGBA = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("image_to_rgba")
     );
@@ -22,10 +29,12 @@ class StableDiffusionPipeline {
     // note: tvm instance is not owned by this class
     this.outputImage.dispose();
     this.imageToRGBA.dispose();
+    this.vaeToImage.dispose();
+    this.vaeParams.dispose();
     this.vm.dispose();
   }
 
-  async showImage(data) {
+  showImage(data) {
     this.tvm.beginScope();
     this.outputImage.copyFrom(data);
     const rgbaData = this.imageToRGBA(this.outputImage);
@@ -33,7 +42,16 @@ class StableDiffusionPipeline {
     this.tvm.endScope();
   }
 
-  async clearImage() {
+  async runVAEStage(data) {
+    this.tvm.beginScope();
+    const temp = this.tvm.empty(data.shape, data.dtype, this.tvm.webgpu());
+    temp.copyFrom(data);
+    const image = this.vaeToImage(temp, this.vaeParams);
+    this.tvm.showImage(this.imageToRGBA(image));
+    this.tvm.endScope();
+  }
+
+  clearImage() {
     this.tvm.clearCanvas();
   }
 };
@@ -41,10 +59,13 @@ class StableDiffusionPipeline {
 function onServerLoad(tvm) {
   const handler = new StableDiffusionPipeline(tvm);
   tvm.registerAsyncServerFunc("showImage", async (data) => {
-    await handler.showImage(data);
+     handler.showImage(data);
+  });
+  tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
+    await handler.runVAEStage(data);
   });
   tvm.registerAsyncServerFunc("clearImage", async () => {
-    await handler.clearImage();
+     handler.clearImage();
   });
 }
 

@@ -106,4 +106,18 @@ def main_show_image():
     remote.get_function("clearImage")(data)
     print("finish")
 
-main_show_image()
+def main_run_vae():
+    latents = torch.load("intermediate/latents.pt")
+    wasm_binary = open(wasm_path, "rb").read()
+    remote = rpc.connect(
+        proxy_host,
+        proxy_port,
+        key="wasm",
+        session_constructor_args=["rpc.WasmSession", wasm_binary],
+    )
+    rawdata = latents.cpu().numpy()
+    data = tvm.nd.array(rawdata, remote.webgpu(0))
+
+    remote.get_function("runVAEStage")(data)
+
+main_run_vae()
