@@ -1,4 +1,3 @@
-
 /**
  * Wrapper to handle PNDM scheduler
  */
@@ -117,10 +116,9 @@ class TVMPNDMScheduler {
 }
 
 class StableDiffusionPipeline {
-  constructor(tvm, tokenizer, schedulerConsts, progressCallback) {
+  constructor(tvm, tokenizer, schedulerConsts) {
     this.tvm = tvm;
     this.tokenizer = tokenizer;
-    this.progressCallback = progressCallback;
     this.maxTokenLength = 77;
 
     this.device = this.tvm.webgpu();
@@ -189,33 +187,49 @@ class StableDiffusionPipeline {
     }
     return this.tvm.empty([1, this.maxTokenLength], "int32", this.device).copyFrom(inputIDs);
   }
-
-  async runVAEStage(data) {
+  /**
+   * Run generation pipeline.
+   *
+   * @param prompt Input prompt
+   * @param vaeCycle optionally draw VAE result every cycle iterations.
+   */
+  async generate(prompt, vaeCycle = -1, progressCallback = undefined) {
+    // Principle: beginScope/endScope in synchronized blocks,
+    // this helps to recycle intermediate memories
+    // detach states that needs to go across async boundaries.
+    //--------------------------
+    // Stage 0: CLIP
+    //--------------------------
     this.tvm.beginScope();
-    const temp = this.tvm.empty(data.shape, data.dtype, this.tvm.webgpu());
-    temp.copyFrom(data);
-    const image = this.vaeToImage(temp, this.vaeParams);
-    this.tvm.showImage(this.imageToRGBA(image));
-    this.tvm.endScope();
-  }
-
-  async runUNetStage(inputLatents, inputEmbeddings, numSteps, vaeCycle) {
-    this.tvm.beginScope();
-    let latents = this.tvm.detachFromCurrentScope(
-      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
-    );
-    let embeddings = this.tvm.detachFromCurrentScope(
-      this.tvm.empty(inputEmbeddings.shape, inputEmbeddings.dtype, this.tvm.webgpu())
-    );
-
-    latents.copyFrom(inputLatents);
-    embeddings.copyFrom(inputEmbeddings);
     scheduler = new TVMPNDMScheduler(this.schedulerConsts, this.tvm, this.device, this.vm);
+    let inputIDs = this.tvm.detachFromCurrentScope(
+      this.tokenize(prompt)
+    );
+    if (progressCallback === undefined) {
+      progressCallback("clip", 0, 1);
+    }
+    const embeddings = this.tvm.detachFromCurrentScope(
+      this.clipToTextEmbeddings(inputIDs, this.clipParams)
+    );
+    // get latents
+    const latentShape = [1, 4, 64, 64];
+    // use uniform distribution with same variance as normal(0, 1)
+    const scale = Math.sqrt(12) / 2;
+    let latents = this.tvm.detachFromCurrentScope(
+      this.tvm.uniform(latentShape, -scale, scale, this.tvm.webgpu())
+    );
     this.tvm.endScope();
-
+    //---------------------------
+    // Stage 1: UNet + Scheduler
+    //---------------------------
+    const numSteps = 50;
+    vaeCycle = vaeCycle == -1 ? numSteps: vaeCycle;
     let lastSync = undefined;
 
     for (let counter = 0; counter < numSteps; ++counter) {
+      if (progressCallback !== undefined) {
+        progressCallback("unet", counter, numSteps);
+      }
       const timestep = scheduler.timestep[counter];
       // recycle noisePred, track latents manually
       const newLatents = this.tvm.withNewScope(() => {
@@ -227,17 +241,14 @@ class StableDiffusionPipeline {
         );
       });
       latents = newLatents;
-
+      // use skip one sync, although likely not as useful.
       if (lastSync !== undefined) {
         await lastSync;
-        console.log("Iter " + counter);
-        if (this.progressCallback !== undefined) {
-          this.progressCallback(counter, numSteps);
-        }
       }
       // async event checker
       lastSync = this.device.sync();
 
+      // Optionally, we can draw intermediate result of VAE.
       if ((counter + 1) % vaeCycle == 0 && (counter + 1) != numSteps) {
         this.tvm.withNewScope(() => {
           const image = this.vaeToImage(latents, this.vaeParams);
@@ -247,6 +258,12 @@ class StableDiffusionPipeline {
       }
     }
     embeddings.dispose();
+    //-----------------------------
+    // Stage 2: VAE and draw image
+    //-----------------------------
+    if (progressCallback !== undefined) {
+      progressCallback("vae", 0, 1);
+    }
     this.tvm.withNewScope(() => {
       const image = this.vaeToImage(latents, this.vaeParams);
       this.tvm.showImage(this.imageToRGBA(image));
@@ -254,40 +271,9 @@ class StableDiffusionPipeline {
     latents.dispose();
     scheduler.dispose();
     await this.device.sync();
-  }
-
-  async runCLIPStage(inputTextIDs, inputLatents, numSteps, vaeCycle) {
-    this.tvm.beginScope();
-    let latents = this.tvm.detachFromCurrentScope(
-      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
-    );
-    let inputIDs = this.tvm.detachFromCurrentScope(
-      this.tvm.empty(inputTextIDs.shape, inputTextIDs.dtype, this.tvm.webgpu())
-    );
-
-    latents.copyFrom(inputLatents);
-    inputIDs.copyFrom(inputTextIDs);
-    this.tvm.endScope();
-    const embeddings = this.clipToTextEmbeddings(inputIDs, this.clipParams);
-    await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
-  }
-
-  async runFullStage(prompt, numSteps, vaeCycle) {
-    this.tvm.beginScope();
-    const latentShape = [1, 4, 64, 64];
-    // use uniform distribution with same variance.
-    const scale = Math.sqrt(12) / 2;
-
-    let latents = this.tvm.detachFromCurrentScope(
-      this.tvm.uniform(latentShape, -scale, scale, this.tvm.webgpu())
-    );
-
-    let inputIDs = this.tvm.detachFromCurrentScope(
-      this.tokenize(prompt)
-    );
-    this.tvm.endScope();
-    const embeddings = this.clipToTextEmbeddings(inputIDs, this.clipParams);
-    await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
+    if (progressCallback !== undefined) {
+      progressCallback("vae", 1, 1);
+    }
   }
 
   clearImage() {
@@ -299,27 +285,28 @@ async function asyncOnServerLoad(tvm) {
   const schedulerConst = await(await fetch("scheduler_consts.json")).json();
   const tokenizer = await tvmjsGlobalEnv.getTokenizer("openai/clip-vit-large-patch14");
 
-  function progressCallback(counter, Steps) {
-
-  }
-
   tvm.beginScope();
-  const handler = new StableDiffusionPipeline(tvm, tokenizer, schedulerConst, progressCallback);
+  const handler = new StableDiffusionPipeline(tvm, tokenizer, schedulerConst);
 
-  tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
-    await handler.runVAEStage(data);
-  });
+  tvm.registerAsyncServerFunc("generate", async (prompt, vaeCycle) => {
+    const tstart = performance.now();
 
-  tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps, vaeCycle) => {
-    await handler.runUNetStage(latents, embeddings, numSteps, vaeCycle);
-  });
-
-  tvm.registerAsyncServerFunc("runCLIPStage", async (textIDs, latents, numSteps, vaeCycle) => {
-    await handler.runCLIPStage(textIDs, latents, numSteps, vaeCycle);
-  });
-
-  tvm.registerAsyncServerFunc("runFullStage", async (prompt, numSteps, vaeCycle) => {
-    await handler.runFullStage(prompt, numSteps, vaeCycle);
+    function progressCallback(stage, counter, numSteps) {
+      const totalSteps = 50 + 2;
+      const timeElapsed = (performance.now() - tstart) / 1000;
+      let text = "Generating ... at stage " + stage;
+      if (stage == "unet") {
+        counter += 1;
+        text += " step [" + counter + "/" + numSteps + "]"
+      }
+      if (stage == "vae") {
+        counter += 51;
+      }
+      text += ", " + Math.ceil(timeElapsed) + " secs elapsed";
+      document.getElementById("progress-tracker-label").innerHTML = text;
+      document.getElementById("progress-tracker-progress").value = (counter / totalSteps) * 100;
+    }
+    await handler.generate(prompt, vaeCycle, progressCallback);
   });
 
   tvm.registerAsyncServerFunc("clearImage", async () => {

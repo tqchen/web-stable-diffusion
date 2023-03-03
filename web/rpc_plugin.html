@@ -1,5 +1,4 @@
 <!--- Plugin module -->
-<h2> Image Generation </h2>
 <script type="module">
   import init, { TokenizerWasm } from "./tokenizers-wasm/tokenizers_wasm.js";
 
@@ -14,4 +13,20 @@
 
 <script src="stable_diffusion.js"></script>
 
+<h2> Web Stable Diffusion </h2>
+
+<div>
+  Input Prompt <input
+  name="inputPrompt"
+  id="inputPrompt"
+  type="text"
+  value="A photo of an astronaut riding a horse on mars"
+  size="77"
+/>
+</div>
+<div>
+  <button onclick="generate()">Generate</button></br>
+</div>
+<div>
 <canvas id="canvas" width="512" height="512"></canvas>
+</div>
