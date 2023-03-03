@@ -120,4 +120,20 @@ def main_run_vae():
 
     remote.get_function("runVAEStage")(data)
 
-main_run_vae()
+def main_run_unet():
+    latents = torch.load("intermediate/unet_input_0.pt")
+    embedding = torch.load("intermediate/clip_output.pt")
+
+    wasm_binary = open(wasm_path, "rb").read()
+    remote = rpc.connect(
+        proxy_host,
+        proxy_port,
+        key="wasm",
+        session_constructor_args=["rpc.WasmSession", wasm_binary],
+    )
+    latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
+    embedding = tvm.nd.array(embedding.cpu().numpy(), remote.webgpu(0))
+
+    remote.get_function("runUNetStage")(latents, embedding, 50)
+
+main_run_unet()

@@ -52,6 +52,8 @@ class TVMSDPipeline:
 
         # Using TVM NDArray
         text_input_ids = tvm.nd.array(text_input_ids.cpu().numpy(), self.tvm_device)
+        torch.save(torch.Tensor(text_input_ids.numpy()), "intermediate/clip_input.pt")
+
         text_embeddings = self.clip_to_text_embeddings(text_input_ids)
         latents = torch.randn(
             # (batch_size * number_images_per_prompt, unet.in_channel, height // 8, width // 8)
@@ -59,12 +61,17 @@ class TVMSDPipeline:
             device="cpu",
             dtype=torch.float32,
         )
+        torch.save(torch.Tensor(latents.numpy()), "intermediate/clip_output.pt")
+
         latents = tvm.nd.array(latents.numpy(), self.tvm_device)
 
         for i in tqdm(range(num_inference_steps)):
             t = self.scheduler.scheduler_consts[i][0]
+            torch.save(torch.Tensor(latents.numpy()), f"intermediate/unet_input_{i}.pt")
             noise_pred = self.unet_latents_to_noise_pred(latents, t, text_embeddings)
+            torch.save(torch.Tensor(noise_pred.numpy()), f"intermediate/unet_output_{i}.pt")
             latents = self.scheduler.step(noise_pred, latents, i)
+            torch.save(torch.Tensor(latents.numpy()), f"intermediate/scheduler_output_{i}.pt")
 
         torch.save(torch.Tensor(latents.numpy()), "intermediate/latents.pt")
         image = self.vae_to_image(latents)
