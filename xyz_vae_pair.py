@@ -168,7 +168,7 @@ def main_run_clip():
     input_ids = tvm.nd.array(input_ids, remote.webgpu(0))
 
     tstart = time.time()
-    remote.get_function("runFullStage")(prompt, latents, 50, 100)
+    remote.get_function("runFullStage")(prompt, 50, 100)
     tend = time.time()
 
 

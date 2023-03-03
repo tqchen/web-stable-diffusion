@@ -272,17 +272,19 @@ class StableDiffusionPipeline {
     await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
   }
 
-  async runFullStage(prompt, inputLatents, numSteps, vaeCycle) {
+  async runFullStage(prompt, numSteps, vaeCycle) {
     this.tvm.beginScope();
+    const latentShape = [1, 4, 64, 64];
+    // use uniform distribution with same variance.
+    const scale = Math.sqrt(12) / 2;
+
     let latents = this.tvm.detachFromCurrentScope(
-      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
+      this.tvm.uniform(latentShape, -scale, scale, this.tvm.webgpu())
     );
 
     let inputIDs = this.tvm.detachFromCurrentScope(
       this.tokenize(prompt)
     );
-
-    latents.copyFrom(inputLatents);
     this.tvm.endScope();
     const embeddings = this.clipToTextEmbeddings(inputIDs, this.clipParams);
     await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
@@ -316,8 +318,8 @@ async function asyncOnServerLoad(tvm) {
     await handler.runCLIPStage(textIDs, latents, numSteps, vaeCycle);
   });
 
-  tvm.registerAsyncServerFunc("runFullStage", async (prompt, latents, numSteps, vaeCycle) => {
-    await handler.runFullStage(prompt, latents, numSteps, vaeCycle);
+  tvm.registerAsyncServerFunc("runFullStage", async (prompt, numSteps, vaeCycle) => {
+    await handler.runFullStage(prompt, numSteps, vaeCycle);
   });
 
   tvm.registerAsyncServerFunc("clearImage", async () => {
