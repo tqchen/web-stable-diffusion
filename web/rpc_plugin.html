@@ -32,7 +32,13 @@
 />
 </div>
 <div>
-  <button onclick="tvmjsGlobalEnv.asyncOnGenerate()">Generate</button></br>
+  Render intermediate steps (can show down execution) -
+  <select name="vae-cycle" id="vaeCycle">
+    <option value="-1">no</option>
+    <option value="2">run vae every two steps</option>
+  </select>
+</br>
+<button onclick="tvmjsGlobalEnv.asyncOnGenerate()">Generate</button>
 </div>
 <div>
 <canvas id="canvas" width="512" height="512"></canvas>

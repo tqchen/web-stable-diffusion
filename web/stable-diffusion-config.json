@@ -1,0 +1,7 @@
+{
+    "schedulerConstUrl": "scheduler_consts.json",
+    "wasmUrl": "stable_diffusion.wasm",
+    "cacheUrl": "/sd-webgpu-v1-5/",
+    "tokenizer": "openai/clip-vit-large-patch14"
+}
+

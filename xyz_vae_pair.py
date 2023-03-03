@@ -162,7 +162,7 @@ def main_run_clip():
     latents = torch.load("intermediate/unet_input_0.pt")
     latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
     input_ids = input_ids.cpu().numpy().astype("int32")
-    prompt = "A photo of an astronaut riding a horse on mars"
+    prompt = "A photo of an astronaut flying over the moon"
 
     print(input_ids)
     input_ids = tvm.nd.array(input_ids, remote.webgpu(0))

@@ -15,7 +15,7 @@ def prepare_params():
     meta_data = {}
     param_dict = {}
     for model in ["unet", "vae", "clip"]:
-        meta_data[f"{model}_param_size"] = len(const_dict[model])
+        meta_data[f"{model}ParamSize"] = len(const_dict[model])
         for i, nd in enumerate(const_dict[model]):
             param_dict[f"{model}_{i}"] = nd
     tvmjs.dump_ndarray_cache(param_dict,

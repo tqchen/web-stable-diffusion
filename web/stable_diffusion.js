@@ -123,7 +123,7 @@ class TVMPNDMScheduler {
 }
 
 class StableDiffusionPipeline {
-  constructor(tvm, tokenizer, schedulerConsts) {
+  constructor(tvm, tokenizer, schedulerConsts, cacheMetaData) {
     this.tvm = tvm;
     this.tokenizer = tokenizer;
     this.maxTokenLength = 77;
@@ -140,19 +140,19 @@ class StableDiffusionPipeline {
       this.vm.getFunction("clip")
     );
     this.clipParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("clip", 197)
+      this.tvm.getParamsFromCache("clip", cacheMetaData.clip_param_size)
     );
     this.unetLatentsToNoisePred = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("unet")
     );
     this.unetParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("unet", 718)
+      this.tvm.getParamsFromCache("unet", cacheMetaData.unet_param_size)
     );
     this.vaeToImage = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("vae")
     );
     this.vaeParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("vae", 140)
+      this.tvm.getParamsFromCache("vae", cacheMetaData.vae_param_size)
     );
     this.imageToRGBA = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("image_to_rgba")
@@ -206,7 +206,7 @@ class StableDiffusionPipeline {
     let inputIDs = this.tvm.detachFromCurrentScope(
       this.tokenize(prompt)
     );
-    if (progressCallback === undefined) {
+    if (progressCallback !== undefined) {
       progressCallback("clip", 0, 1);
     }
     const embeddings = this.tvm.detachFromCurrentScope(
@@ -290,6 +290,7 @@ class StableDiffusionInstance {
     this.tvm = undefined;
     this.pipeline = undefined;
     this.config = undefined;
+    this.cacheMetaData = undefined;
     this.logger = console.log;
   }
   /**
@@ -343,7 +344,7 @@ class StableDiffusionInstance {
     if (!cacheUrl.startsWith("http")) {
       cacheUrl = new URL(cacheUrl, document.URL).href;
     }
-    await tvm.fetchNDArrayCache(cacheUrl, tvm.webgpu());
+    this.cacheMetaData = await tvm.fetchNDArrayCache(cacheUrl, tvm.webgpu());
   }
 
   /**
@@ -360,7 +361,7 @@ class StableDiffusionInstance {
     const schedulerConst = await(await fetch(schedulerConstUrl)).json();
     const tokenizer = await tvmjsGlobalEnv.getTokenizer(tokenizerName);
     this.pipeline = this.tvm.withNewScope(() => {
-      return new StableDiffusionPipeline(this.tvm, tokenizer, schedulerConst);
+      return new StableDiffusionPipeline(this.tvm, tokenizer, schedulerConst, this.cacheMetaData);
     });
   }
 
@@ -396,7 +397,7 @@ class StableDiffusionInstance {
     return progressCallback;
   }
 
-  /**
+ /**
    * Async initialize instance.
    */
   async asyncInit() {
@@ -418,11 +419,12 @@ class StableDiffusionInstance {
     this.tvm = tvmInstance;
 
     await this.#asyncInitConfig();
-    await this.asyncInitPipeline(this.config.schedulerConstUrl, this.config.tokenizer);
+    await this.#asyncInitPipeline(this.config.schedulerConstUrl, this.config.tokenizer);
 
     this.tvm.beginScope();
     this.tvm.registerAsyncServerFunc("generate", async (prompt, vaeCycle) => {
-      await this.pipeline.generate(prompt, vaeCycle, this.#getProgressCallback());
+      document.getElementById("inputPrompt").value = prompt;
+      await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
     });
 
     this.tvm.registerAsyncServerFunc("clearCanvas", async () => {
@@ -436,7 +438,8 @@ class StableDiffusionInstance {
    */
   async generate() {
     const prompt = document.getElementById("inputPrompt").value;
-    await this.pipeline.generate(prompt);
+    const vaeCycle =document.getElementById("vaeCycle").value;
+    await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
   }
 }
 
@@ -447,9 +450,7 @@ tvmjsGlobalEnv.asyncOnGenerate = async function() {
   await localStableDiffusionInst.generate();
 }
 
-tvmjsGlobalEnv.asyncOnServerLoad = function(tvm) {
-  new StableDiffusionInstance().asyncInitOnRPCServerLoad(tvm);
+tvmjsGlobalEnv.asyncOnRPCServerLoad = async function(tvm) {
+  const inst = new StableDiffusionInstance();
+  await inst.asyncInitOnRPCServerLoad(tvm);
 };
-
-
-
