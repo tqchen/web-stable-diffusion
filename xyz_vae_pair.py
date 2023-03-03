@@ -94,6 +94,12 @@ def main_show_image():
     print(data.shape)
     image = numpy_to_pil(rawdata)
     image[0].save("build/vae_pair_show.png")
+    # remote.get_function("showImage")(data)
+    input()
+
+    latents = torch.load("intermediate/vae_image_webgpu.pt")
+    rawdata = latents.cpu().numpy()
+    data = tvm.nd.array(rawdata, remote.webgpu(0))
     remote.get_function("showImage")(data)
     print("finish")
 

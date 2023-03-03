@@ -7,26 +7,28 @@ class StableDiffusionPipeline {
     this.outputImage = tvm.detachFromCurrentScope(
       tvm.empty([512, 512, 3], "float32", tvm.cpu())
     );
+    this.outputTemp = tvm.detachFromCurrentScope(
+      tvm.empty([512, 512], "uint32", tvm.cpu())
+    );
     this.device = tvm.webgpu();
+    tvm.bindCanvas(document.getElementById("canvas"));
   }
 
   dispose() {
     this.outputImage.dispose();
   }
 
-  /**
-   * Given a float32 array show the image.
-   *
-   * @param data The input data.
-   */
   async showImage(data) {
     this.outputImage.copyFrom(data);
-    // sync to make sure data is ready
     await this.device.sync();
-    const imgData = this.tvm.floatNDArrayToImageData(this.outputImage);
-    const imageCanvas = document.getElementById("canvas");
-    const imageCanvasContext = imageCanvas.getContext("2d");
-    imageCanvasContext.putImageData(imgData, 0, 0);
+    this.tvm.beginScope();
+    const imgData = this.tvm.ctx.floatNDArrayToCanvasBuffer(this.outputImage);
+    this.outputTemp.copyFromRawBytes(new Uint8Array(imgData));
+    const gpuArr = this.tvm.empty([512, 512], "uint32", this.tvm.webgpu());
+    gpuArr.copyFrom(this.outputTemp);
+    this.tvm.drawGPUImage(gpuArr);
+    this.tvm.endScope();
+
   }
 };
 
