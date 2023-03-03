@@ -26,9 +26,12 @@ class StableDiffusionPipeline {
     this.outputTemp.copyFromRawBytes(new Uint8Array(imgData));
     const gpuArr = this.tvm.empty([512, 512], "uint32", this.tvm.webgpu());
     gpuArr.copyFrom(this.outputTemp);
-    this.tvm.drawGPUImage(gpuArr);
+    this.tvm.showImage(gpuArr);
     this.tvm.endScope();
+  }
 
+  async clearImage() {
+    this.tvm.clearCanvas();
   }
 };
 
@@ -36,6 +39,9 @@ function onServerLoad(tvm) {
   const handler = new StableDiffusionPipeline(tvm);
   tvm.registerAsyncServerFunc("showImage", async (data) => {
     await handler.showImage(data);
+  });
+  tvm.registerAsyncServerFunc("clearImage", async (data) => {
+    await handler.clearImage();
   });
 }
 

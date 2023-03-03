@@ -11908,3 +11908,23 @@ class Module:
             gv: R.Tensor((1, 512, 512, 3), dtype="float32") = lv239
             R.output(gv)
         return gv
+
+    @T.prim_func
+    def te_to_rgba(rxplaceholder: T.Buffer((T.int64(1), T.int64(512), T.int64(512), T.int64(3)), "float32"), B: T.Buffer((T.int64(512), T.int64(512)), "uint32")):
+        T.func_attr({"tir.noalias": True})
+        # with T.block("root"):
+        for y_x_fused_0 in T.thread_binding(T.int64(2048), thread="blockIdx.x"):
+            for y_x_fused_1 in T.thread_binding(T.int64(128), thread="threadIdx.x"):
+                with T.block("B"):
+                    v_y = T.axis.spatial(T.int64(512), (y_x_fused_0 * T.int64(128) + y_x_fused_1) // T.int64(512))
+                    v_x = T.axis.spatial(T.int64(512), (y_x_fused_0 * T.int64(128) + y_x_fused_1) % T.int64(512))
+                    T.reads(rxplaceholder[T.int64(0), v_y, v_x, T.int64(0):T.int64(3)])
+                    T.writes(B[v_y, v_x])
+                    B[v_y, v_x] = T.bitwise_or(T.bitwise_or(T.bitwise_or(T.Cast("uint32", T.min(T.max(T.round(rxplaceholder[T.int64(0), v_y, v_x, T.int64(0)] * T.float32(255)), T.float32(0)), T.float32(255))), T.shift_left(T.Cast("uint32", T.min(T.max(T.round(rxplaceholder[T.int64(0), v_y, v_x, T.int64(1)] * T.float32(255)), T.float32(0)), T.float32(255))), T.uint32(8))), T.shift_left(T.Cast("uint32", T.min(T.max(T.round(rxplaceholder[T.int64(0), v_y, v_x, T.int64(2)] * T.float32(255)), T.float32(0)), T.float32(255))), T.uint32(16))), T.uint32(4278190080))
+
+    @R.function
+    def image_to_rgba(x: R.Tensor((1, 512, 512, 3), dtype="float32")) -> R.Tensor((512, 512), dtype="uint32"):
+        with R.dataflow():
+            gv = R.call_tir(te_to_rgba, (x,), out_sinfo=R.Tensor((512, 512), dtype="uint32"))
+            R.output(gv)
+        return gv
