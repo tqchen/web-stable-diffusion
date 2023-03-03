@@ -182,11 +182,29 @@ class StableDiffusionPipeline {
     this.tvm.endScope();
   }
 
-  async runVAEStage(data) {
+  async runUNetStage(inputLatents, inputEmbeddings, numSteps) {
     this.tvm.beginScope();
-    const temp = this.tvm.empty(data.shape, data.dtype, this.tvm.webgpu());
-    temp.copyFrom(data);
-    const image = this.vaeToImage(temp, this.vaeParams);
+    let latents = this.tvm.empty(inputLatents.shape, data.dtype, this.tvm.webgpu());
+    let embeddings = this.tvm.empty(inputEmbeddings.shape, inputEmbeddings.dtype, this.tvm.webgpu());
+
+    latents.copyFrom(inputLatents);
+    embeddings.copyFrom(inputEmbeddings);
+
+    for (let counter = 0; counter < numSteps; ++counter) {
+      const timestep = self.scheduler.timestep[counter];
+      // recycle noisePred, track latents manually
+      const newLatents = this.tvm.withNewScope(() => {
+        const noisePred = self.unetLatentsToNoisePred(latents, timestep, embeddings);
+        // maintain new latents
+        return this.tvm.detachFromCurrentScope(
+          self.scheduler.step(noisePred, latents, counter)
+        );
+      });
+      latents.dispose();
+      latents = newLatents;
+    }
+    const image = this.vaeToImage(latents, this.vaeParams);
+    latents.dispose();
     this.tvm.showImage(this.imageToRGBA(image));
     this.tvm.endScope();
   }
@@ -206,6 +224,9 @@ async function asyncOnServerLoad(tvm) {
   tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
      handler.runVAEStage(data);
   });
+  tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps) => {
+    handler.runUNetStage(latents, embeddings, numSteps);
+ });
   tvm.registerAsyncServerFunc("clearImage", async () => {
      handler.clearImage();
   });
