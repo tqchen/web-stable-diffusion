@@ -148,4 +148,23 @@ def main_run_unet():
     tend = time.time()
     print(f"Time ={tend - tstart}")
 
-main_run_unet()
+
+def main_run_clip():
+    input_ids = torch.load("intermediate/clip_input.pt")
+
+    wasm_binary = open(wasm_path, "rb").read()
+    remote = rpc.connect(
+        proxy_host,
+        proxy_port,
+        key="wasm",
+        session_constructor_args=["rpc.WasmSession", wasm_binary],
+    )
+    latents = torch.load("intermediate/unet_input_0.pt")
+    latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
+    input_ids = tvm.nd.array(input_ids.cpu().numpy().astype("int32"), remote.webgpu(0))
+    tstart = time.time()
+    remote.get_function("runCLIPStage")(input_ids, latents, 50, 100)
+    tend = time.time()
+
+
+main_run_clip()

@@ -117,10 +117,11 @@ class TVMPNDMScheduler {
 }
 
 class StableDiffusionPipeline {
-  constructor(tvm, schedulerConsts) {
+  constructor(tvm, schedulerConsts, progressCallback) {
     this.tvm = tvm;
     this.image_width = 512;
     this.image_height = 512;
+    this.progressCallback = progressCallback;
     // hold output image
     this.outputImage = tvm.detachFromCurrentScope(
       tvm.empty([1, 512, 512, 3], "float32", tvm.webgpu())
@@ -194,8 +195,10 @@ class StableDiffusionPipeline {
 
     latents.copyFrom(inputLatents);
     embeddings.copyFrom(inputEmbeddings);
-    let lastSync = undefined;
     scheduler = new TVMPNDMScheduler(this.schedulerConsts, this.tvm, this.device, this.vm);
+    this.tvm.endScope();
+
+    let lastSync = undefined;
 
     for (let counter = 0; counter < numSteps; ++counter) {
       const timestep = scheduler.timestep[counter];
@@ -212,6 +215,7 @@ class StableDiffusionPipeline {
 
       if (lastSync !== undefined) {
         await lastSync;
+        console.log("Iter " + counter);
       }
       // async event checker
       lastSync = this.device.sync();
@@ -225,12 +229,29 @@ class StableDiffusionPipeline {
       }
     }
     embeddings.dispose();
-
-    const image = this.vaeToImage(latents, this.vaeParams);
+    this.tvm.withNewScope(() => {
+      const image = this.vaeToImage(latents, this.vaeParams);
+      this.tvm.showImage(this.imageToRGBA(image));
+    });
     latents.dispose();
-    this.tvm.showImage(this.imageToRGBA(image));
     scheduler.dispose();
     await this.device.sync();
+  }
+
+  async runCLIPStage(inputTextIDs, inputLatents, numSteps, vaeCycle) {
+    this.tvm.beginScope();
+    let latents = this.tvm.detachFromCurrentScope(
+      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
+    );
+    let inputIDs = this.tvm.detachFromCurrentScope(
+      this.tvm.empty(inputTextIDs.shape, inputTextIDs.dtype, this.tvm.webgpu())
+    );
+
+    latents.copyFrom(inputLatents);
+    inputIDs.copyFrom(inputTextIDs);
+    this.tvm.endScope();
+    const embeddings = this.clipToTextEmbeddings(inputIDs, this.clipParams);
+    await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
   }
 
   clearImage() {
@@ -253,6 +274,10 @@ async function asyncOnServerLoad(tvm) {
 
   tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps, vaeCycle) => {
     await handler.runUNetStage(latents, embeddings, numSteps, vaeCycle);
+  });
+
+  tvm.registerAsyncServerFunc("runCLIPStage", async (textIDs, latents, numSteps, vaeCycle) => {
+    await handler.runCLIPStage(textIDs, latents, numSteps, vaeCycle);
   });
 
   tvm.registerAsyncServerFunc("clearImage", async () => {
