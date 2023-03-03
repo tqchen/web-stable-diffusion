@@ -5,28 +5,31 @@ class StableDiffusionPipeline {
     this.image_height = 512;
     // hold output image
     this.outputImage = tvm.detachFromCurrentScope(
-      tvm.empty([512, 512, 3], "float32", tvm.cpu())
+      tvm.empty([1, 512, 512, 3], "float32", tvm.webgpu())
     );
-    this.outputTemp = tvm.detachFromCurrentScope(
-      tvm.empty([512, 512], "uint32", tvm.cpu())
+    this.device = this.tvm.webgpu();
+    this.tvm.bindCanvas(document.getElementById("canvas"));
+    // VM functions
+    this.vm = this.tvm.detachFromCurrentScope(
+      this.tvm.createVirtualMachine(this.device)
     );
-    this.device = tvm.webgpu();
-    tvm.bindCanvas(document.getElementById("canvas"));
+    this.imageToRGBA = this.tvm.detachFromCurrentScope(
+      this.vm.getFunction("image_to_rgba")
+    );
   }
 
   dispose() {
+    // note: tvm instance is not owned by this class
     this.outputImage.dispose();
+    this.imageToRGBA.dispose();
+    this.vm.dispose();
   }
 
   async showImage(data) {
-    this.outputImage.copyFrom(data);
-    await this.device.sync();
     this.tvm.beginScope();
-    const imgData = this.tvm.ctx.floatNDArrayToCanvasBuffer(this.outputImage);
-    this.outputTemp.copyFromRawBytes(new Uint8Array(imgData));
-    const gpuArr = this.tvm.empty([512, 512], "uint32", this.tvm.webgpu());
-    gpuArr.copyFrom(this.outputTemp);
-    this.tvm.showImage(gpuArr);
+    this.outputImage.copyFrom(data);
+    const rgbaData = this.imageToRGBA(this.outputImage);
+    this.tvm.showImage(rgbaData);
     this.tvm.endScope();
   }
 
@@ -40,7 +43,7 @@ function onServerLoad(tvm) {
   tvm.registerAsyncServerFunc("showImage", async (data) => {
     await handler.showImage(data);
   });
-  tvm.registerAsyncServerFunc("clearImage", async (data) => {
+  tvm.registerAsyncServerFunc("clearImage", async () => {
     await handler.clearImage();
   });
 }
