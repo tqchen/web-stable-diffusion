@@ -135,6 +135,6 @@ def main_run_unet():
     latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
     embedding = tvm.nd.array(embedding.cpu().numpy(), remote.webgpu(0))
 
-    remote.get_function("runUNetStage")(latents, embedding, 50)
+    remote.get_function("runUNetStage")(latents, embedding, 50, 5)
 
 main_run_unet()

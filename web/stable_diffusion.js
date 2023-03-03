@@ -96,21 +96,20 @@ class TVMPNDMScheduler {
 
       prevLatents = this.schedulerFunc[1](
         modelOutput,
-          sample,
-          this.sampleCoeff[counter],
-          this.alphaDiff[counter],
-          this.modelOutputDenomCoeff[counter],
-          this.ets[0]
+        sample,
+        this.sampleCoeff[counter],
+        this.alphaDiff[counter],
+        this.modelOutputDenomCoeff[counter],
+        this.ets[0]
       );
     } else  {
-      const reverseETS = this.ets.slice().reverse();
       const findex = counter < 5 ? counter : 4;
       prevLatents = this.schedulerFunc[findex](
         sample,
         this.sampleCoeff[counter],
         this.alphaDiff[counter],
         this.modelOutputDenomCoeff[counter],
-        ...reverseETS
+        ...this.ets
       );
     }
     return prevLatents;
@@ -185,16 +184,18 @@ class StableDiffusionPipeline {
     this.tvm.endScope();
   }
 
-  async runUNetStage(inputLatents, inputEmbeddings, numSteps) {
+  async runUNetStage(inputLatents, inputEmbeddings, numSteps, vaeCycle) {
     this.tvm.beginScope();
     let latents = this.tvm.detachFromCurrentScope(
       this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
     );
-    let embeddings = this.tvm.empty(inputEmbeddings.shape, inputEmbeddings.dtype, this.tvm.webgpu());
-    console.log(embeddings.shape);
+    let embeddings = this.tvm.detachFromCurrentScope(
+      this.tvm.empty(inputEmbeddings.shape, inputEmbeddings.dtype, this.tvm.webgpu())
+    );
 
     latents.copyFrom(inputLatents);
     embeddings.copyFrom(inputEmbeddings);
+    let lastSync = undefined;
 
     for (let counter = 0; counter < numSteps; ++counter) {
       const timestep = this.scheduler.timestep[counter];
@@ -209,15 +210,27 @@ class StableDiffusionPipeline {
       });
       latents = newLatents;
 
+      if (lastSync !== undefined) {
+        //await lastSync;
+        console.log("Finish iter " + (counter-1));
+        await lastSync;
+      }
       // async event checker
-      this.device.sync().then(()=>{
-        console.log("Finish iter " + counter);
-      });
+      lastSync = this.device.sync();
+
+      if ((counter + 1) % vaeCycle == 0 && (counter + 1) != numSteps) {
+        this.tvm.withNewScope(() => {
+          const image = this.vaeToImage(latents, this.vaeParams);
+          this.tvm.showImage(this.imageToRGBA(image));
+        });
+        await this.device.sync();
+      }
     }
+    embeddings.dispose();
+
     const image = this.vaeToImage(latents, this.vaeParams);
     latents.dispose();
     this.tvm.showImage(this.imageToRGBA(image));
-    this.tvm.endScope();
   }
 
   clearImage() {
@@ -231,15 +244,15 @@ async function asyncOnServerLoad(tvm) {
 
   const handler = new StableDiffusionPipeline(tvm, schedulerConst);
   tvm.registerAsyncServerFunc("showImage", async (data) => {
-     handler.showImage(data);
+    await handler.showImage(data);
   });
 
   tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
-     handler.runVAEStage(data);
+    await handler.runVAEStage(data);
   });
 
-  tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps) => {
-    handler.runUNetStage(latents, embeddings, numSteps);
+  tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps, vaeCycle) => {
+    await handler.runUNetStage(latents, embeddings, numSteps, vaeCycle);
   });
 
   tvm.registerAsyncServerFunc("clearImage", async () => {
