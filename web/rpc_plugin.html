@@ -1,4 +1,17 @@
 <!--- Plugin module -->
 <h2> Image Generation </h2>
+<script type="module">
+  import init, { TokenizerWasm } from "./tokenizers-wasm/tokenizers_wasm.js";
+
+  async function getTokenizer(name) {
+    await init();
+    const jsonText = await (await fetch("https://huggingface.co/" + name + "/raw/main/tokenizer.json")).text();
+    return new TokenizerWasm(jsonText);
+  }
+
+  tvmjsGlobalEnv.getTokenizer = getTokenizer;
+</script>
+
 <script src="stable_diffusion.js"></script>
+
 <canvas id="canvas" width="512" height="512"></canvas>

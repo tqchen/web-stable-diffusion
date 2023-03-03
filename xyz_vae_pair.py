@@ -161,9 +161,14 @@ def main_run_clip():
     )
     latents = torch.load("intermediate/unet_input_0.pt")
     latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
-    input_ids = tvm.nd.array(input_ids.cpu().numpy().astype("int32"), remote.webgpu(0))
+    input_ids = input_ids.cpu().numpy().astype("int32")
+    prompt = "A photo of an astronaut riding a horse on mars"
+
+    print(input_ids)
+    input_ids = tvm.nd.array(input_ids, remote.webgpu(0))
+
     tstart = time.time()
-    remote.get_function("runCLIPStage")(input_ids, latents, 50, 100)
+    remote.get_function("runFullStage")(prompt, latents, 50, 100)
     tend = time.time()
 
 

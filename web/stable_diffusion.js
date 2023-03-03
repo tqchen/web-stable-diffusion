@@ -117,15 +117,12 @@ class TVMPNDMScheduler {
 }
 
 class StableDiffusionPipeline {
-  constructor(tvm, schedulerConsts, progressCallback) {
+  constructor(tvm, tokenizer, schedulerConsts, progressCallback) {
     this.tvm = tvm;
-    this.image_width = 512;
-    this.image_height = 512;
+    this.tokenizer = tokenizer;
     this.progressCallback = progressCallback;
-    // hold output image
-    this.outputImage = tvm.detachFromCurrentScope(
-      tvm.empty([1, 512, 512, 3], "float32", tvm.webgpu())
-    );
+    this.maxTokenLength = 77;
+
     this.device = this.tvm.webgpu();
     this.tvm.bindCanvas(document.getElementById("canvas"));
     // VM functions
@@ -167,12 +164,30 @@ class StableDiffusionPipeline {
     this.scheduler.dispose();
   }
 
-  showImage(data) {
+  showImage(vaeOutput) {
     this.tvm.beginScope();
-    this.outputImage.copyFrom(data);
-    const rgbaData = this.imageToRGBA(this.outputImage);
+    const rgbaData = this.imageToRGBA(vaeOutput);
     this.tvm.showImage(rgbaData);
     this.tvm.endScope();
+  }
+
+  /**
+   * Tokenize the prompt to TVMNDArray.
+   * @param prompt Input prompt
+   * @returns The text id NDArray.
+   */
+  tokenize(prompt) {
+    const encoded = this.tokenizer.encode(prompt, true).input_ids;
+    const inputIDs = new Int32Array(this.maxTokenLength);
+
+    if (encoded.length < this.maxTokenLength) {
+      inputIDs.set(encoded);
+      const lastTok = encoded[encoded.length - 1];
+      inputIDs.fill(lastTok, encoded.length, inputIDs.length);
+    } else {
+      inputIDs.set(encoded.slice(0, this.maxTokenLength));
+    }
+    return this.tvm.empty([1, this.maxTokenLength], "int32", this.device).copyFrom(inputIDs);
   }
 
   async runVAEStage(data) {
@@ -216,6 +231,9 @@ class StableDiffusionPipeline {
       if (lastSync !== undefined) {
         await lastSync;
         console.log("Iter " + counter);
+        if (this.progressCallback !== undefined) {
+          this.progressCallback(counter, numSteps);
+        }
       }
       // async event checker
       lastSync = this.device.sync();
@@ -254,6 +272,22 @@ class StableDiffusionPipeline {
     await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
   }
 
+  async runFullStage(prompt, inputLatents, numSteps, vaeCycle) {
+    this.tvm.beginScope();
+    let latents = this.tvm.detachFromCurrentScope(
+      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
+    );
+
+    let inputIDs = this.tvm.detachFromCurrentScope(
+      this.tokenize(prompt)
+    );
+
+    latents.copyFrom(inputLatents);
+    this.tvm.endScope();
+    const embeddings = this.clipToTextEmbeddings(inputIDs, this.clipParams);
+    await this.runUNetStage(latents, embeddings, numSteps, vaeCycle);
+  }
+
   clearImage() {
     this.tvm.clearCanvas();
   }
@@ -261,12 +295,14 @@ class StableDiffusionPipeline {
 
 async function asyncOnServerLoad(tvm) {
   const schedulerConst = await(await fetch("scheduler_consts.json")).json();
-  tvm.beginScope();
+  const tokenizer = await tvmjsGlobalEnv.getTokenizer("openai/clip-vit-large-patch14");
 
-  const handler = new StableDiffusionPipeline(tvm, schedulerConst);
-  tvm.registerAsyncServerFunc("showImage", async (data) => {
-    await handler.showImage(data);
-  });
+  function progressCallback(counter, Steps) {
+
+  }
+
+  tvm.beginScope();
+  const handler = new StableDiffusionPipeline(tvm, tokenizer, schedulerConst, progressCallback);
 
   tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
     await handler.runVAEStage(data);
@@ -278,6 +314,10 @@ async function asyncOnServerLoad(tvm) {
 
   tvm.registerAsyncServerFunc("runCLIPStage", async (textIDs, latents, numSteps, vaeCycle) => {
     await handler.runCLIPStage(textIDs, latents, numSteps, vaeCycle);
+  });
+
+  tvm.registerAsyncServerFunc("runFullStage", async (prompt, latents, numSteps, vaeCycle) => {
+    await handler.runFullStage(prompt, latents, numSteps, vaeCycle);
   });
 
   tvm.registerAsyncServerFunc("clearImage", async () => {
