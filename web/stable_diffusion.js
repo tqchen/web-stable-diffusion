@@ -1,3 +1,10 @@
+globalConfig = {
+  "schedulerConstUrl": "./scheduler_consts.json",
+  "wasmUrl": "./stable_diffusion.wasm",
+  "cacheUrl": "./sd-webgpu-v1-5",
+  "tokenizer": "openai/clip-vit-large-patch14"
+}
+
 /**
  * Wrapper to handle PNDM scheduler
  */
@@ -162,13 +169,6 @@ class StableDiffusionPipeline {
     this.scheduler.dispose();
   }
 
-  showImage(vaeOutput) {
-    this.tvm.beginScope();
-    const rgbaData = this.imageToRGBA(vaeOutput);
-    this.tvm.showImage(rgbaData);
-    this.tvm.endScope();
-  }
-
   /**
    * Tokenize the prompt to TVMNDArray.
    * @param prompt Input prompt
@@ -190,10 +190,11 @@ class StableDiffusionPipeline {
   /**
    * Run generation pipeline.
    *
-   * @param prompt Input prompt
+   * @param prompt Input prompt.
+   * @param progressCallback Callback to check progress.
    * @param vaeCycle optionally draw VAE result every cycle iterations.
    */
-  async generate(prompt, vaeCycle = -1, progressCallback = undefined) {
+  async generate(prompt, progressCallback = undefined, vaeCycle = -1) {
     // Principle: beginScope/endScope in synchronized blocks,
     // this helps to recycle intermediate memories
     // detach states that needs to go across async boundaries.
@@ -276,21 +277,107 @@ class StableDiffusionPipeline {
     }
   }
 
-  clearImage() {
+  clearCanvas() {
     this.tvm.clearCanvas();
   }
 };
 
-async function asyncOnServerLoad(tvm) {
-  const schedulerConst = await(await fetch("scheduler_consts.json")).json();
-  const tokenizer = await tvmjsGlobalEnv.getTokenizer("openai/clip-vit-large-patch14");
+/**
+ * A instance that can be used to facilitate deployment.
+ */
+class StableDiffusionInstance {
+  constructor() {
+    this.tvm = undefined;
+    this.pipeline = undefined;
+    this.config = undefined;
+    this.logger = console.log;
+  }
+  /**
+   * Initialize TVM
+   * @param wasmUrl URL to wasm source.
+   * @param cacheUrl URL to NDArray cache.
+   * @param logger Custom logger.
+   */
+  async #asyncInitTVM(wasmUrl, cacheUrl) {
+    if (this.tvm !== undefined) {
+      return;
+    }
 
-  tvm.beginScope();
-  const handler = new StableDiffusionPipeline(tvm, tokenizer, schedulerConst);
+    if (document.getElementById("log") !== undefined) {
+      this.logger = function(message) {
+        console.log(message);
+        const d = document.createElement("div");
+        d.innerHTML = message;
+        document.getElementById("log").appendChild(d);
+      };
+    }
 
-  tvm.registerAsyncServerFunc("generate", async (prompt, vaeCycle) => {
+    const wasmSource = await (
+      await fetch(wasmUrl)
+    ).arrayBuffer();
+    const tvm = await tvmjs.instantiate(
+      new Uint8Array(wasmSource),
+      new EmccWASI(),
+      this.logger
+    );
+    this.tvm = tvm;
+    // intialize WebGPU
+    try {
+      const gpuDevice = await tvmjs.detectGPUDevice();
+      if (gpuDevice !== undefined && gpuDevice !== null) {
+        const label = gpuDevice.label?.toString() || "WebGPU";
+        this.logger("Initialize GPU device: " + label);
+        this.tvm.initWebGPU(gpuDevice);
+      } else {
+        this.logger("Cannot find WebGPU device in the environment");
+      }
+    } catch (err) {
+      this.logger("Cannnot initialize WebGPU, " + err.toString());
+    }
+
+    function fetchProgressCallback(report) {
+      document.getElementById("progress-tracker-label").innerHTML = report.text;
+      document.getElementById("progress-tracker-progress").value = (report.fetchedBytes / report.totalBytes) * 100;
+    }
+    tvm.registerFetchProgressCallback(fetchProgressCallback);
+    if (!cacheUrl.startsWith("http")) {
+      cacheUrl = new URL(cacheUrl, document.URL).href;
+    }
+    await tvm.fetchNDArrayCache(cacheUrl, tvm.webgpu());
+  }
+
+  /**
+   * Initialize the pipeline
+   *
+   * @param schedulerConstUrl The scheduler constant.
+   * @param tokenizerName The name of the tokenizer.
+   */
+  async #asyncInitPipeline(schedulerConstUrl, tokenizerName) {
+    if (this.tvm == undefined) {
+      throw Error("asyncInitTVM is not called");
+    }
+    if (this.pipeline !== undefined) return;
+    const schedulerConst = await(await fetch(schedulerConstUrl)).json();
+    const tokenizer = await tvmjsGlobalEnv.getTokenizer(tokenizerName);
+    this.pipeline = this.tvm.withNewScope(() => {
+      return new StableDiffusionPipeline(this.tvm, tokenizer, schedulerConst);
+    });
+  }
+
+  /**
+   * Async intitialize config
+   */
+  async #asyncInitConfig() {
+    if (this.config !== undefined) return;
+    this.config = await(await fetch("stable-diffusion-config.json")).json();
+  }
+
+  /**
+   * Function to create progress callback tracker.
+   * @returns A progress callback tracker.
+   */
+   #getProgressCallback() {
     const tstart = performance.now();
-
     function progressCallback(stage, counter, numSteps) {
       const totalSteps = 50 + 2;
       const timeElapsed = (performance.now() - tstart) / 1000;
@@ -306,13 +393,63 @@ async function asyncOnServerLoad(tvm) {
       document.getElementById("progress-tracker-label").innerHTML = text;
       document.getElementById("progress-tracker-progress").value = (counter / totalSteps) * 100;
     }
-    await handler.generate(prompt, vaeCycle, progressCallback);
-  });
+    return progressCallback;
+  }
 
-  tvm.registerAsyncServerFunc("clearImage", async () => {
-     handler.clearImage();
-  });
-  tvm.endScope();
+  /**
+   * Async initialize instance.
+   */
+  async asyncInit() {
+    if (this.pipeline !== undefined) return;
+    await this.#asyncInitConfig();
+    await this.#asyncInitTVM(this.config.wasmUrl, this.config.cacheUrl);
+    await this.#asyncInitPipeline(this.config.schedulerConstUrl, this.config.tokenizer);
+  }
+
+  /**
+   * Async initialize
+   *
+   * @param tvm The tvm instance.
+   */
+  async asyncInitOnRPCServerLoad(tvmInstance) {
+    if (this.tvm !== undefined) {
+      throw Error("Cannot reuse a loaded instance for rpc");
+    }
+    this.tvm = tvmInstance;
+
+    await this.#asyncInitConfig();
+    await this.asyncInitPipeline(this.config.schedulerConstUrl, this.config.tokenizer);
+
+    this.tvm.beginScope();
+    this.tvm.registerAsyncServerFunc("generate", async (prompt, vaeCycle) => {
+      await this.pipeline.generate(prompt, vaeCycle, this.#getProgressCallback());
+    });
+
+    this.tvm.registerAsyncServerFunc("clearCanvas", async () => {
+      this.pipeline.clearCanvas();
+    });
+    this.tvm.endScope();
+  }
+
+  /**
+   * Run generate
+   */
+  async generate() {
+    const prompt = document.getElementById("inputPrompt").value;
+    await this.pipeline.generate(prompt);
+  }
 }
 
-tvmjsGlobalEnv.asyncOnServerLoad = asyncOnServerLoad;
+localStableDiffusionInst = new StableDiffusionInstance();
+
+tvmjsGlobalEnv.asyncOnGenerate = async function() {
+  await localStableDiffusionInst.asyncInit();
+  await localStableDiffusionInst.generate();
+}
+
+tvmjsGlobalEnv.asyncOnServerLoad = function(tvm) {
+  new StableDiffusionInstance().asyncInitOnRPCServerLoad(tvm);
+};
+
+
+

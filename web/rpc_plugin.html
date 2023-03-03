@@ -1,9 +1,16 @@
 <!--- Plugin module -->
+<script>
+  tvmjsGlobalEnv = tvmjsGlobalEnv || {};
+</script>
+
 <script type="module">
   import init, { TokenizerWasm } from "./tokenizers-wasm/tokenizers_wasm.js";
 
+  var initialized = false;
   async function getTokenizer(name) {
-    await init();
+    if (!initialized) {
+      await init();
+    }
     const jsonText = await (await fetch("https://huggingface.co/" + name + "/raw/main/tokenizer.json")).text();
     return new TokenizerWasm(jsonText);
   }
@@ -25,7 +32,7 @@
 />
 </div>
 <div>
-  <button onclick="generate()">Generate</button></br>
+  <button onclick="tvmjsGlobalEnv.asyncOnGenerate()">Generate</button></br>
 </div>
 <div>
 <canvas id="canvas" width="512" height="512"></canvas>
