@@ -70,10 +70,10 @@ class TVMPNDMScheduler {
   step(modelOutput, sample, counter) {
     if (counter != 1) {
       // remove the recorded history
-      if (self.ets.length > 4) {
-        self.ets.shift().dispose();
+      if (this.ets.length > 3) {
+        this.ets.shift().dispose();
       }
-      self.ets.push(this.tvm.detachFromCurrentScope(
+      this.ets.push(this.tvm.detachFromCurrentScope(
         modelOutput
       ));
     }
@@ -187,24 +187,32 @@ class StableDiffusionPipeline {
 
   async runUNetStage(inputLatents, inputEmbeddings, numSteps) {
     this.tvm.beginScope();
-    let latents = this.tvm.empty(inputLatents.shape, data.dtype, this.tvm.webgpu());
+    let latents = this.tvm.detachFromCurrentScope(
+      this.tvm.empty(inputLatents.shape, inputLatents.dtype, this.tvm.webgpu())
+    );
     let embeddings = this.tvm.empty(inputEmbeddings.shape, inputEmbeddings.dtype, this.tvm.webgpu());
+    console.log(embeddings.shape);
 
     latents.copyFrom(inputLatents);
     embeddings.copyFrom(inputEmbeddings);
 
     for (let counter = 0; counter < numSteps; ++counter) {
-      const timestep = self.scheduler.timestep[counter];
+      const timestep = this.scheduler.timestep[counter];
       // recycle noisePred, track latents manually
       const newLatents = this.tvm.withNewScope(() => {
-        const noisePred = self.unetLatentsToNoisePred(latents, timestep, embeddings);
+        this.tvm.attachToCurrentScope(latents);
+        const noisePred = this.unetLatentsToNoisePred(latents, timestep, embeddings, this.unetParams);
         // maintain new latents
         return this.tvm.detachFromCurrentScope(
-          self.scheduler.step(noisePred, latents, counter)
+          this.scheduler.step(noisePred, latents, counter)
         );
       });
-      latents.dispose();
       latents = newLatents;
+
+      // async event checker
+      this.device.sync().then(()=>{
+        console.log("Finish iter " + counter);
+      });
     }
     const image = this.vaeToImage(latents, this.vaeParams);
     latents.dispose();

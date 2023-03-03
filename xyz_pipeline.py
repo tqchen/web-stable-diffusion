@@ -61,7 +61,7 @@ class TVMSDPipeline:
             device="cpu",
             dtype=torch.float32,
         )
-        torch.save(torch.Tensor(latents.numpy()), "intermediate/clip_output.pt")
+        torch.save(torch.Tensor(text_embeddings.numpy()), "intermediate/clip_output.pt")
 
         latents = tvm.nd.array(latents.numpy(), self.tvm_device)
 

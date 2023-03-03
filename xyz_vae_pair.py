@@ -131,9 +131,10 @@ def main_run_unet():
         key="wasm",
         session_constructor_args=["rpc.WasmSession", wasm_binary],
     )
+    print(embedding.shape)
     latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
     embedding = tvm.nd.array(embedding.cpu().numpy(), remote.webgpu(0))
 
     remote.get_function("runUNetStage")(latents, embedding, 50)
 
-main_run_vae()
+main_run_unet()
