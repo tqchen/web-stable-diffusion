@@ -12,6 +12,7 @@ class TVMPNDMScheduler {
     this.schedulerFunc = [];
     this.currSample = undefined;
     this.tvm = tvm;
+
     // prebuild constants
     // principle: always detach for class members
     // to avoid recyling output scope.
@@ -131,7 +132,9 @@ class StableDiffusionPipeline {
     this.vm = this.tvm.detachFromCurrentScope(
       this.tvm.createVirtualMachine(this.device)
     );
-    this.scheduler = new TVMPNDMScheduler(schedulerConsts, tvm, this.vm);
+
+    this.scheduler = new TVMPNDMScheduler(schedulerConsts, tvm, this.device, this.vm);
+
     this.clipToTextEmbeddings = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("clip")
     );
@@ -216,20 +219,25 @@ class StableDiffusionPipeline {
 
 async function asyncOnServerLoad(tvm) {
   const schedulerConst = await(await fetch("scheduler_consts.json")).json();
+  tvm.beginScope();
 
   const handler = new StableDiffusionPipeline(tvm, schedulerConst);
   tvm.registerAsyncServerFunc("showImage", async (data) => {
      handler.showImage(data);
   });
+
   tvm.registerAsyncServerFunc("runVAEStage", async (data) => {
      handler.runVAEStage(data);
   });
+
   tvm.registerAsyncServerFunc("runUNetStage", async (latents, embeddings, numSteps) => {
     handler.runUNetStage(latents, embeddings, numSteps);
- });
+  });
+
   tvm.registerAsyncServerFunc("clearImage", async () => {
      handler.clearImage();
   });
+  tvm.endScope();
 }
 
 tvmjsGlobalEnv.asyncOnServerLoad = asyncOnServerLoad;

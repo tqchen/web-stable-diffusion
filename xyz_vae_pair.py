@@ -136,4 +136,4 @@ def main_run_unet():
 
     remote.get_function("runUNetStage")(latents, embedding, 50)
 
-main_run_unet()
+main_run_vae()
