@@ -11,6 +11,7 @@ from tvm import meta_schedule as ms, relax
 from tvm import rpc
 
 import json
+import time
 from tvm.contrib import tvmjs
 from utils import numpy_to_pil, torch_wrapper as wrapper, load_params, remote_torch_wrapper as remote_wrapper
 
@@ -134,7 +135,17 @@ def main_run_unet():
     print(embedding.shape)
     latents = tvm.nd.array(latents.cpu().numpy(), remote.webgpu(0))
     embedding = tvm.nd.array(embedding.cpu().numpy(), remote.webgpu(0))
+    tstart = time.time()
+    remote.get_function("runUNetStage")(latents, embedding, 50, 100)
+    tend = time.time()
 
-    remote.get_function("runUNetStage")(latents, embedding, 50, 5)
+    print(f"Time ={tend - tstart}")
+
+    input()
+    print("second attempt")
+    tstart = time.time()
+    remote.get_function("runUNetStage")(latents, embedding, 50, 100)
+    tend = time.time()
+    print(f"Time ={tend - tstart}")
 
 main_run_unet()

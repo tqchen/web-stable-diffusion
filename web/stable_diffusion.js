@@ -132,8 +132,7 @@ class StableDiffusionPipeline {
       this.tvm.createVirtualMachine(this.device)
     );
 
-    this.scheduler = new TVMPNDMScheduler(schedulerConsts, tvm, this.device, this.vm);
-
+    this.schedulerConsts = schedulerConsts;
     this.clipToTextEmbeddings = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("clip")
     );
@@ -196,23 +195,22 @@ class StableDiffusionPipeline {
     latents.copyFrom(inputLatents);
     embeddings.copyFrom(inputEmbeddings);
     let lastSync = undefined;
+    scheduler = new TVMPNDMScheduler(this.schedulerConsts, this.tvm, this.device, this.vm);
 
     for (let counter = 0; counter < numSteps; ++counter) {
-      const timestep = this.scheduler.timestep[counter];
+      const timestep = scheduler.timestep[counter];
       // recycle noisePred, track latents manually
       const newLatents = this.tvm.withNewScope(() => {
         this.tvm.attachToCurrentScope(latents);
         const noisePred = this.unetLatentsToNoisePred(latents, timestep, embeddings, this.unetParams);
         // maintain new latents
         return this.tvm.detachFromCurrentScope(
-          this.scheduler.step(noisePred, latents, counter)
+          scheduler.step(noisePred, latents, counter)
         );
       });
       latents = newLatents;
 
       if (lastSync !== undefined) {
-        //await lastSync;
-        console.log("Finish iter " + (counter-1));
         await lastSync;
       }
       // async event checker
@@ -231,6 +229,8 @@ class StableDiffusionPipeline {
     const image = this.vaeToImage(latents, this.vaeParams);
     latents.dispose();
     this.tvm.showImage(this.imageToRGBA(image));
+    scheduler.dispose();
+    await this.device.sync();
   }
 
   clearImage() {
