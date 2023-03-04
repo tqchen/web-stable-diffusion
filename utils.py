@@ -10,7 +10,7 @@ from tvm import relax
 import tvm
 import torch
 from PIL import Image
-from tvm.contrib import tvmjs
+from tvm.contrib import tvmjs, utils as _utils
 
 
 def load_constant_from_file(dir: str, dev, deploy: bool) -> Dict[str, List[tvm.nd.NDArray]]:
@@ -48,7 +48,7 @@ def load_params(cache_path, device):
     params, meta = tvmjs.load_ndarray_cache(cache_path, device)
     for model in ["vae", "unet", "clip"]:
         plist = []
-        size = meta[f"{model}_param_size"]
+        size = meta[f"{model}ParamSize"]
         for i in range(size):
             plist.append(params[f"{model}_{i}"])
         pdict[model] = plist
@@ -208,7 +208,7 @@ def debug_webgpu_to_metal_module(mtl_mod, mod_wgsl):
     temp = _utils.tempdir()
     assert(len(smap) == len(finfo))
 
-    msl_map = {}
+    all_msl = []
     for name, lines in smap.items():
         wgsl_name = f"debug/{name}.wgsl"
         msl_name = f"debug/{name}.tint.msl"
@@ -225,12 +225,12 @@ def debug_webgpu_to_metal_module(mtl_mod, mod_wgsl):
 
         msl_source = open(msl_name, "r").read()
         msl_source = f"// Function: {name}\n" + msl_source
-        msl_map[name] = msl_source
+        all_msl += [ msl_source ]
         finfo[name]["launch_param_tags"].pop()
 
 
     msl_mod = tvm.get_global_func("runtime.module.create_metal_module")(
-        msl_source, json.dumps(finfo))
+        "\n".join(all_msl), json.dumps(finfo))
     print("OK")
     mtl_mod.imported_modules[0].clear_imports()
     mtl_mod.imported_modules[0].import_module(msl_mod)

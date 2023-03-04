@@ -13,16 +13,18 @@ from tvm import rpc
 import json
 import time
 from tvm.contrib import tvmjs
-from utils import numpy_to_pil, torch_wrapper as wrapper, load_params, remote_torch_wrapper as remote_wrapper
+from utils import numpy_to_pil, torch_wrapper as wrapper, load_params, remote_torch_wrapper as remote_wrapper, build_with_tint
 
-def build_metal():
+def build_metal(use_tint):
     import webgpu_module
     relax_mod = webgpu_module.Module
     target = tvm.target.Target("apple/m2-gpu", host="llvm")
-    ex = relax.build(relax_mod, target)
+    if use_tint:
+        ex = build_with_tint(relax_mod)
+    else:
+        ex = relax.build(relax_mod, target)
     vm = relax.VirtualMachine(ex, tvm.metal())
     return vm
-
 
 proxy_host = "127.0.0.1"
 proxy_port = 9090
@@ -66,20 +68,21 @@ def main_webgpu():
     image[0].save("build/vae_pair_webgpu.png")
 
 
-def main_metal():
+def main_metal(use_tint=False):
     dev = tvm.metal()
     param_dict = load_params("../tvm/web/.ndarray_cache/sd-webgpu-v1-5", dev)
     latents = torch.load("intermediate/latents.pt")
     print("finish load")
-    vm = build_metal()
+    vm = build_metal(use_tint)
+    suffix = "tint" if use_tint else "metal"
     print("finish build")
     vae = wrapper(vm, "vae", param_dict["vae"], tvm.metal(), torch.device("mps"), time_eval=True)
     image = vae(latents)
-    torch.save(image, "intermediate/vae_image_metal.pt")
+    torch.save(image, f"intermediate/vae_image_{suffix}.pt")
     print("finish exec")
     image = image.cpu().numpy()
     image = numpy_to_pil(image)
-    image[0].save("build/vae_pair_metal.png")
+    image[0].save(f"build/vae_pair_{suffix}.png")
 
 def main_show_image():
     wasm_binary = open(wasm_path, "rb").read()
@@ -176,20 +179,4 @@ def main_run_clip():
     tend = time.time()
 
 
-def main_tint():
-    dev = tvm.metal()
-    param_dict = load_params("../tvm/web/.ndarray_cache/sd-webgpu-v1-5", dev)
-    latents = torch.load("intermediate/latents.pt")
-    print("finish load")
-    vm = build_metal()
-    print("finish build")
-    vae = wrapper(vm, "vae", param_dict["vae"], tvm.metal(), torch.device("mps"), time_eval=True)
-    image = vae(latents)
-    torch.save(image, "intermediate/vae_image_metal.pt")
-    print("finish exec")
-    image = image.cpu().numpy()
-    image = numpy_to_pil(image)
-    image[0].save("build/vae_pair_metal.png")
-
-
-main_metal()
+main_metal(use_tint=True)
