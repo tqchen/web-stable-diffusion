@@ -123,7 +123,10 @@ class TVMPNDMScheduler {
 }
 
 class StableDiffusionPipeline {
-  constructor(tvm, tokenizer, schedulerConsts, cacheMetaData) {
+  constructor(tvm, tokenizer, schedulerConsts, cacheMetadata) {
+    if (cacheMetadata == undefined) {
+      throw Error("Expect cacheMetadata");
+    }
     this.tvm = tvm;
     this.tokenizer = tokenizer;
     this.maxTokenLength = 77;
@@ -140,19 +143,19 @@ class StableDiffusionPipeline {
       this.vm.getFunction("clip")
     );
     this.clipParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("clip", cacheMetaData.clip_param_size)
+      this.tvm.getParamsFromCache("clip", cacheMetadata.clipParamSize)
     );
     this.unetLatentsToNoisePred = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("unet")
     );
     this.unetParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("unet", cacheMetaData.unet_param_size)
+      this.tvm.getParamsFromCache("unet", cacheMetadata.unetParamSize)
     );
     this.vaeToImage = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("vae")
     );
     this.vaeParams = this.tvm.detachFromCurrentScope(
-      this.tvm.getParamsFromCache("vae", cacheMetaData.vae_param_size)
+      this.tvm.getParamsFromCache("vae", cacheMetadata.vaeParamSize)
     );
     this.imageToRGBA = this.tvm.detachFromCurrentScope(
       this.vm.getFunction("image_to_rgba")
@@ -193,8 +196,9 @@ class StableDiffusionPipeline {
    * @param prompt Input prompt.
    * @param progressCallback Callback to check progress.
    * @param vaeCycle optionally draw VAE result every cycle iterations.
+   * @param beginRenderVae Begin rendering VAE after skipping these warmup runs.
    */
-  async generate(prompt, progressCallback = undefined, vaeCycle = -1) {
+  async generate(prompt, progressCallback = undefined, vaeCycle = -1, beginRenderVae = 10) {
     // Principle: beginScope/endScope in synchronized blocks,
     // this helps to recycle intermediate memories
     // detach states that needs to go across async boundaries.
@@ -223,6 +227,14 @@ class StableDiffusionPipeline {
     //---------------------------
     // Stage 1: UNet + Scheduler
     //---------------------------
+    if (vaeCycle != -1) {
+      // show first frame
+      this.tvm.withNewScope(() => {
+        const image = this.vaeToImage(latents, this.vaeParams);
+        this.tvm.showImage(this.imageToRGBA(image));
+      });
+      await this.device.sync();
+    }
     const numSteps = 50;
     vaeCycle = vaeCycle == -1 ? numSteps: vaeCycle;
     let lastSync = undefined;
@@ -250,7 +262,9 @@ class StableDiffusionPipeline {
       lastSync = this.device.sync();
 
       // Optionally, we can draw intermediate result of VAE.
-      if ((counter + 1) % vaeCycle == 0 && (counter + 1) != numSteps) {
+      if ((counter + 1) % vaeCycle == 0 &&
+          (counter + 1) != numSteps &&
+          counter >= beginRenderVae) {
         this.tvm.withNewScope(() => {
           const image = this.vaeToImage(latents, this.vaeParams);
           this.tvm.showImage(this.imageToRGBA(image));
@@ -290,7 +304,7 @@ class StableDiffusionInstance {
     this.tvm = undefined;
     this.pipeline = undefined;
     this.config = undefined;
-    this.cacheMetaData = undefined;
+    this.generateInProgress = false;
     this.logger = console.log;
   }
   /**
@@ -344,7 +358,7 @@ class StableDiffusionInstance {
     if (!cacheUrl.startsWith("http")) {
       cacheUrl = new URL(cacheUrl, document.URL).href;
     }
-    this.cacheMetaData = await tvm.fetchNDArrayCache(cacheUrl, tvm.webgpu());
+    await tvm.fetchNDArrayCache(cacheUrl, tvm.webgpu());
   }
 
   /**
@@ -361,7 +375,7 @@ class StableDiffusionInstance {
     const schedulerConst = await(await fetch(schedulerConstUrl)).json();
     const tokenizer = await tvmjsGlobalEnv.getTokenizer(tokenizerName);
     this.pipeline = this.tvm.withNewScope(() => {
-      return new StableDiffusionPipeline(this.tvm, tokenizer, schedulerConst, this.cacheMetaData);
+      return new StableDiffusionPipeline(this.tvm, tokenizer, schedulerConst, this.tvm.cacheMetadata);
     });
   }
 
@@ -437,18 +451,38 @@ class StableDiffusionInstance {
    * Run generate
    */
   async generate() {
-    const prompt = document.getElementById("inputPrompt").value;
-    const vaeCycle =document.getElementById("vaeCycle").value;
-    await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
+    if (this.requestInProgress) {
+      this.logger("Request in progress, generate request ignored");
+      return;
+    }
+    this.requestInProgress = true;
+    try {
+      await this.asyncInit();
+      const prompt = document.getElementById("inputPrompt").value;
+      const vaeCycle =document.getElementById("vaeCycle").value;
+      await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
+    } catch (err) {
+      this.logger("Generate error, " + err.toString());
+      // reset so we can try to reinitialize next time.
+      this.reset();
+    }
+    this.requestInProgress = false;
+  }
+
+  /**
+   * Reset the instance;
+   */
+  reset() {
+    this.tvm = undefined;
+    this.pipeline = undefined;
   }
 }
 
 localStableDiffusionInst = new StableDiffusionInstance();
 
 tvmjsGlobalEnv.asyncOnGenerate = async function() {
-  await localStableDiffusionInst.asyncInit();
   await localStableDiffusionInst.generate();
-}
+};
 
 tvmjsGlobalEnv.asyncOnRPCServerLoad = async function(tvm) {
   const inst = new StableDiffusionInstance();
