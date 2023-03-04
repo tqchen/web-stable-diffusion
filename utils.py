@@ -1,7 +1,7 @@
 from typing import Dict, List
 
 import os
-
+import json, subprocess
 import numpy as np
 import pickle
 
@@ -175,3 +175,70 @@ def numpy_to_pil(images):
         pil_images = [Image.fromarray(image, mode="RGB") for image in images]
 
     return pil_images
+
+
+
+def debug_webgpu_to_metal_module(mtl_mod, mod_wgsl):
+    """Update a module to metal module via tint.
+
+    Parameters
+    ----------
+    mod: Input module that contains a webgpu module.
+
+    """
+    mod = mod_wgsl.imported_modules[0]
+    assert mod.type_key == "llvm"
+
+    webgpu_mod = mod.imported_modules[0]
+    assert webgpu_mod.type_key == "webgpu"
+
+    finfo = json.loads(webgpu_mod.get_source("func_info"))
+    source = webgpu_mod.get_source()
+    smap = {}
+    curr = None
+    for line in source.split("\n"):
+        if line.startswith("// Function: "):
+            fname = line[13:].strip()
+            curr = []
+            smap[fname] = curr
+            continue
+        if curr is not None:
+            curr.append(line)
+
+    temp = _utils.tempdir()
+    assert(len(smap) == len(finfo))
+
+    msl_map = {}
+    for name, lines in smap.items():
+        wgsl_name = f"debug/{name}.wgsl"
+        msl_name = f"debug/{name}.tint.msl"
+        with open(wgsl_name, "w") as ofile:
+            ofile.write(("\n".join(lines)) + "\n")
+        cmd = ["tint", wgsl_name, "--format", "msl", "-o", msl_name]
+        if True:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            (out, _) = proc.communicate()
+            if proc.returncode != 0:
+                msg = "Compilation error:\n"
+                msg += tvm._ffi.py_str(out)
+                raise RuntimeError(msg)
+
+        msl_source = open(msl_name, "r").read()
+        msl_source = f"// Function: {name}\n" + msl_source
+        msl_map[name] = msl_source
+        finfo[name]["launch_param_tags"].pop()
+
+
+    msl_mod = tvm.get_global_func("runtime.module.create_metal_module")(
+        msl_source, json.dumps(finfo))
+    print("OK")
+    mtl_mod.imported_modules[0].clear_imports()
+    mtl_mod.imported_modules[0].import_module(msl_mod)
+
+
+def build_with_tint(mod):
+    ex = relax.build(mod, tvm.target.Target("metal", host="llvm"))
+    target = tvm.target.Target("webgpu", host="llvm")
+    ex_wgsl = relax.build(mod, target)
+    debug_webgpu_to_metal_module(ex.mod, ex_wgsl.mod)
+    return ex

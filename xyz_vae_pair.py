@@ -175,4 +175,21 @@ def main_run_clip():
     remote.get_function("generate")(prompt, 2)
     tend = time.time()
 
-main_run_clip()
+
+def main_tint():
+    dev = tvm.metal()
+    param_dict = load_params("../tvm/web/.ndarray_cache/sd-webgpu-v1-5", dev)
+    latents = torch.load("intermediate/latents.pt")
+    print("finish load")
+    vm = build_metal()
+    print("finish build")
+    vae = wrapper(vm, "vae", param_dict["vae"], tvm.metal(), torch.device("mps"), time_eval=True)
+    image = vae(latents)
+    torch.save(image, "intermediate/vae_image_metal.pt")
+    print("finish exec")
+    image = image.cpu().numpy()
+    image = numpy_to_pil(image)
+    image[0].save("build/vae_pair_metal.png")
+
+
+main_metal()
