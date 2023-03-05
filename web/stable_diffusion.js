@@ -335,7 +335,6 @@ class StableDiffusionInstance {
       new EmccWASI(),
       this.logger
     );
-    this.tvm = tvm;
     // intialize WebGPU
     try {
       const output = await tvmjs.detectGPUDevice();
@@ -348,14 +347,17 @@ class StableDiffusionInstance {
         document.getElementById(
           "gpu-tracker-label").innerHTML = "This browser env do not support WebGPU";
       }
+      this.reset();
+      throw Error("This broweser env do not support WebGPU");
     } catch(err) {
       document.getElementById("gpu-tracker-label").innerHTML = (
         "Find an error initializing the WebGPU device " + err.toString()
       );
       console.log(err.stack);
-      throw err;
+      throw Error("Find an error initializing WebGPU: " + err.toString());
     }
 
+    this.tvm = tvm;
     function fetchProgressCallback(report) {
       document.getElementById("progress-tracker-label").innerHTML = report.text;
       document.getElementById("progress-tracker-progress").value = (report.fetchedBytes / report.totalBytes) * 100;
@@ -469,7 +471,7 @@ class StableDiffusionInstance {
       await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
     } catch (err) {
       this.logger("Generate error, " + err.toString());
-      console.log(err.stackTrace());
+      console.log(err.stack);
       this.reset();
     }
     this.requestInProgress = false;
