@@ -338,16 +338,22 @@ class StableDiffusionInstance {
     this.tvm = tvm;
     // intialize WebGPU
     try {
-      const gpuDevice = await tvmjs.detectGPUDevice();
-      if (gpuDevice !== undefined && gpuDevice !== null) {
-        const label = gpuDevice.label?.toString() || "WebGPU";
-        this.logger("Initialize GPU device: " + label);
-        this.tvm.initWebGPU(gpuDevice);
+      const output = await tvmjs.detectGPUDevice();
+      if (output !== undefined) {
+        const label = "WebGPU - "+ output.adapterInfo.description;
+        document.getElementById(
+          "gpu-tracker-label").innerHTML = ("Initialize GPU device: " + label);
+        this.tvm.initWebGPU(output.device);
       } else {
-        this.logger("Cannot find WebGPU device in the environment");
+        document.getElementById(
+          "gpu-tracker-label").innerHTML = "This browser env do not support WebGPU";
       }
-    } catch (err) {
-      this.logger("Cannnot initialize WebGPU, " + err.toString());
+    } catch(err) {
+      document.getElementById("gpu-tracker-label").innerHTML = (
+        "Find an error initializing the WebGPU device " + err.toString()
+      );
+      console.log(err.stack);
+      throw err;
     }
 
     function fetchProgressCallback(report) {
@@ -463,7 +469,7 @@ class StableDiffusionInstance {
       await this.pipeline.generate(prompt, this.#getProgressCallback(), vaeCycle);
     } catch (err) {
       this.logger("Generate error, " + err.toString());
-      // reset so we can try to reinitialize next time.
+      console.log(err.stackTrace());
       this.reset();
     }
     this.requestInProgress = false;

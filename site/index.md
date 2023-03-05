@@ -9,4 +9,4 @@ notitle: true
 
 This is a page
 
-{% stable_diffusion.html }
+{% include stable_diffusion.html %}

@@ -24,7 +24,7 @@ permalink: /blog/:year/:month/:day/:title.html
 front_page_news: 8
 
 # Base pathname for links.
-base: '/summer22'
+base: '/web-stable-diffusion/'
 
 # make pages for the _projects folder
 collections:
@@ -37,5 +37,5 @@ course_title:
 navigation:
   - title: Home
     link: /
-  - title: Demo
-    link: /demo
+  - title: Github
+    link: https://github.com/mlc-ai/web-stable-diffusion
