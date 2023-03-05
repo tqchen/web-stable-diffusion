@@ -52,7 +52,7 @@ class TVMSDPipeline:
 
         # Using TVM NDArray
         text_input_ids = tvm.nd.array(text_input_ids.cpu().numpy(), self.tvm_device)
-        torch.save(torch.Tensor(text_input_ids.numpy(), dtype=torch.int32), "intermediate/clip_input.pt")
+        torch.save(torch.Tensor(text_input_ids.numpy()), "intermediate/clip_input.pt")
 
         text_embeddings = self.clip_to_text_embeddings(text_input_ids)
         latents = torch.randn(

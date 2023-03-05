@@ -32,7 +32,7 @@ wasm_path = "build/vae.wasm"
 
 def build_webgpu(skip_build):
     nparams = int(json.load(open(
-        "../tvm/web/.ndarray_cache/sd-webgpu-v1-5/ndarray-cache.json", "r"))["meta_data"]["vae_param_size"])
+        "../tvm/web/.ndarray_cache/sd-webgpu-v1-5/ndarray-cache.json", "r"))["metadata"]["vaeParamSize"])
     print(f"nparams={nparams}")
     if not skip_build:
         import webgpu_module
@@ -178,5 +178,5 @@ def main_run_clip():
     remote.get_function("generate")(prompt, 2)
     tend = time.time()
 
-
-main_metal(use_tint=True)
+main_webgpu()
+# vmain_metal(use_tint=True)
