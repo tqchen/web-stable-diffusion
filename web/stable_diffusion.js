@@ -339,21 +339,27 @@ class StableDiffusionInstance {
     try {
       const output = await tvmjs.detectGPUDevice();
       if (output !== undefined) {
-        const label = "WebGPU - "+ output.adapterInfo.description;
+        var label = "WebGPU";
+        if (output.adapterInfo.description.length != 0) {
+          label += " - " + output.adapterInfo.description;
+        } else {
+          label += " - " + output.adapterInfo.vendor;
+        }
         document.getElementById(
           "gpu-tracker-label").innerHTML = ("Initialize GPU device: " + label);
-        this.tvm.initWebGPU(output.device);
+        tvm.initWebGPU(output.device);
       } else {
         document.getElementById(
           "gpu-tracker-label").innerHTML = "This browser env do not support WebGPU";
+          this.reset();
+          throw Error("This broweser env do not support WebGPU");
       }
-      this.reset();
-      throw Error("This broweser env do not support WebGPU");
     } catch(err) {
       document.getElementById("gpu-tracker-label").innerHTML = (
         "Find an error initializing the WebGPU device " + err.toString()
       );
       console.log(err.stack);
+      this.reset();
       throw Error("Find an error initializing WebGPU: " + err.toString());
     }
 
