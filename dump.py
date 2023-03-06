@@ -29,7 +29,7 @@ def preproc(log_dir):
     db = ms.database.create(work_dir=log_dir)
     with target, db, tvm.transform.PassContext(opt_level=3):
         relax_mod = relax.transform.MetaScheduleApplyDatabase()(relax_mod)
-
+    relax_mod = tvm.tir.transform.ForceNarrowIndexToInt32()(relax_mod)
     return relax_mod
 
 
@@ -69,7 +69,7 @@ def get_to_rgba():
     return sch.mod
 
 def main():
-    mod = get_to_rgba()
+    mod = preproc("webgpu_0228")
     print(mod.script(show_meta=True))
 
 main()
