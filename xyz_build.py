@@ -6,6 +6,7 @@ import numpy as np
 import tvm
 from tvm.contrib import tvmjs
 import tvm.testing
+from utils import build_with_tint
 from tvm import meta_schedule as ms, relax
 import webgpu_module
 

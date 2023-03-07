@@ -214,7 +214,7 @@ def debug_webgpu_to_metal_module(mtl_mod, mod_wgsl):
         msl_name = f"debug/{name}.tint.msl"
         with open(wgsl_name, "w") as ofile:
             ofile.write(("\n".join(lines)) + "\n")
-        cmd = ["tint", wgsl_name, "--format", "msl", "-o", msl_name]
+        cmd = ["tint", wgsl_name, "--format","msl", "--transform", "robustness",  "-o", msl_name]
         if True:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             (out, _) = proc.communicate()

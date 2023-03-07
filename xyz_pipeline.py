@@ -67,13 +67,13 @@ class TVMSDPipeline:
 
         for i in tqdm(range(num_inference_steps)):
             t = self.scheduler.scheduler_consts[i][0]
-            torch.save(torch.Tensor(latents.numpy()), f"intermediate/unet_input_{i}.pt")
+            # torch.save(torch.Tensor(latents.numpy()), f"intermediate/unet_input_{i}.pt")
             noise_pred = self.unet_latents_to_noise_pred(latents, t, text_embeddings)
-            torch.save(torch.Tensor(noise_pred.numpy()), f"intermediate/unet_output_{i}.pt")
+            # torch.save(torch.Tensor(noise_pred.numpy()), f"intermediate/unet_output_{i}.pt")
             latents = self.scheduler.step(noise_pred, latents, i)
-            torch.save(torch.Tensor(latents.numpy()), f"intermediate/scheduler_output_{i}.pt")
+            # torch.save(torch.Tensor(latents.numpy()), f"intermediate/scheduler_output_{i}.pt")
 
-        torch.save(torch.Tensor(latents.numpy()), "intermediate/latents.pt")
+        # torch.save(torch.Tensor(latents.numpy()), "intermediate/latents.pt")
         image = self.vae_to_image(latents)
         image = image.numpy()
 
